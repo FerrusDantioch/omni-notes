@@ -1,0 +1,348 @@
+<!doctype html>
+<!--
+  Omni-Notes — index.html
+  La page unique de l'application. Elle contient tous les « écrans »
+  (liste, édition, corbeille, réglages…). Un seul est visible à la fois :
+  les autres portent l'attribut « hidden » (caché).
+  Le fichier app.js se charge d'afficher le bon écran.
+  © 2026 Ferrus Dantioch — Licence CC BY-NC-ND 4.0
+-->
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Omni-Notes</title>
+  <meta name="description" content="Omni-Notes : bloc-notes et pense-bête gratuit, sans compte, qui fonctionne hors ligne. Vos notes restent sur votre appareil.">
+  <!-- Couleur de la barre du navigateur (mise à jour selon le thème par app.js) -->
+  <meta name="theme-color" id="couleur-theme" content="#f2efe8">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icones/icone.svg" type="image/svg+xml">
+  <link rel="icon" href="icones/icone-192.png" type="image/png" sizes="192x192">
+  <link rel="apple-touch-icon" href="icones/icone-180.png">
+  <link rel="stylesheet" href="style.css">
+  <script>
+    // Applique tout de suite le thème et la taille de texte choisis, AVANT
+    // l'affichage, pour éviter un « flash » de mauvaises couleurs au démarrage.
+    try {
+      var apparence = JSON.parse(localStorage.getItem('omni-notes-apparence') || '{}');
+      if (apparence.theme === 'clair' || apparence.theme === 'sombre') {
+        document.documentElement.dataset.theme = apparence.theme;
+      }
+      if (apparence.taille === 'grande' || apparence.taille === 'tres-grande') {
+        document.documentElement.dataset.taille = apparence.taille;
+      }
+    } catch (e) { /* Pas grave : le thème sera appliqué un instant plus tard. */ }
+  </script>
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+
+  <!-- ===== Bibliothèque d'icônes (dessins simples réutilisés partout) ===== -->
+  <svg xmlns="http://www.w3.org/2000/svg" hidden>
+    <symbol id="i-retour" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-recherche" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></symbol>
+    <symbol id="i-corbeille" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+    <symbol id="i-reglages" viewBox="0 0 24 24"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></symbol>
+    <symbol id="i-epingle" viewBox="0 0 24 24"><path d="M9 4h6l-1 6 3 3H7l3-3-1-6zM12 13v7"/></symbol>
+    <symbol id="i-fermer" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-restaurer" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4h4"/></symbol>
+    <symbol id="i-exporter" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></symbol>
+    <symbol id="i-importer" viewBox="0 0 24 24"><path d="M12 20V9M7 14l5-5 5 5M5 4h14"/></symbol>
+    <symbol id="i-cadenas" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></symbol>
+    <symbol id="i-liste" viewBox="0 0 24 24"><path d="M10 6h10M10 12h10M10 18h10M4 6l1.5 1.5L8 5M4 12l1.5 1.5L8 11M4 18l1.5 1.5L8 17"/></symbol>
+    <symbol id="i-texte" viewBox="0 0 24 24"><path d="M5 6h14M5 10h14M5 14h14M5 18h9"/></symbol>
+  </svg>
+
+  <!-- ===== Écran de chargement (visible quelques instants au démarrage) ===== -->
+  <section id="ecran-chargement" class="ecran ecran-centre">
+    <p>Chargement…</p>
+  </section>
+
+  <!-- ===== Écran de déverrouillage (seulement si un mot de passe est activé) ===== -->
+  <section id="ecran-verrou" class="ecran ecran-centre" hidden>
+    <div class="verrou-boite">
+      <img src="icones/icone.svg" alt="" width="72" height="72">
+      <h1>Omni-Notes</h1>
+      <p>Vos notes sont protégées par un mot de passe.</p>
+      <form id="form-verrou" class="pile" novalidate>
+        <label for="champ-verrou" class="etiquette-champ">Mot de passe</label>
+        <input type="password" id="champ-verrou" class="saisie" autocomplete="current-password" autocapitalize="off" spellcheck="false">
+        <label class="case"><input type="checkbox" id="voir-verrou"> Afficher le mot de passe</label>
+        <p id="erreur-verrou" class="erreur" role="alert"></p>
+        <button type="submit" class="bouton principal large" id="btn-deverrouiller">
+          <svg class="icone" aria-hidden="true"><use href="#i-cadenas"/></svg> Déverrouiller
+        </button>
+      </form>
+      <details class="oubli">
+        <summary>Mot de passe oublié ?</summary>
+        <p>Le mot de passe n'est enregistré nulle part : <strong>il est impossible de le retrouver</strong>, et personne ne peut le réinitialiser. Sans lui, les notes chiffrées ne peuvent pas être lues.</p>
+        <p>Si vous l'avez vraiment perdu, vous pouvez tout effacer et repartir de zéro. Si vous avez un fichier de sauvegarde, vous pourrez ensuite l'importer (il vous faudra le mot de passe utilisé au moment de cette sauvegarde, s'il y en avait un).</p>
+        <button type="button" id="btn-tout-effacer" class="bouton danger large">Tout effacer et recommencer</button>
+      </details>
+    </div>
+  </section>
+
+  <!-- ===== Écran principal : la liste des notes ===== -->
+  <section id="ecran-liste" class="ecran" hidden>
+    <header class="barre">
+      <h1 class="barre-titre">Omni-Notes</h1>
+      <button type="button" class="bouton-icone" id="btn-ouvrir-corbeille">
+        <svg class="icone" aria-hidden="true"><use href="#i-corbeille"/></svg><span>Corbeille</span>
+      </button>
+      <button type="button" class="bouton-icone" id="btn-ouvrir-reglages">
+        <svg class="icone" aria-hidden="true"><use href="#i-reglages"/></svg><span>Réglages</span>
+      </button>
+    </header>
+    <div class="contenu">
+      <!-- Rappel discret de sauvegarde -->
+      <div id="rappel-sauvegarde" class="rappel" hidden>
+        <p id="rappel-texte"></p>
+        <div class="rangee">
+          <button type="button" id="rappel-sauver" class="bouton principal">
+            <svg class="icone" aria-hidden="true"><use href="#i-exporter"/></svg> Sauvegarder
+          </button>
+          <button type="button" id="rappel-plus-tard" class="bouton">Plus tard</button>
+        </div>
+      </div>
+
+      <div class="recherche">
+        <label for="champ-recherche" class="visuellement-cache">Rechercher dans les notes</label>
+        <svg class="icone" aria-hidden="true"><use href="#i-recherche"/></svg>
+        <input type="search" id="champ-recherche" class="saisie" placeholder="Rechercher…" autocomplete="off" enterkeyhint="search">
+      </div>
+
+      <div id="filtres-etiquettes" class="filtres" role="group" aria-label="Filtrer par étiquette" hidden></div>
+
+      <div id="liste-notes"></div>
+      <p id="liste-vide" class="vide" hidden></p>
+    </div>
+    <button type="button" id="btn-nouvelle-note" class="bouton-flottant" aria-label="Nouvelle note">
+      <svg class="icone" aria-hidden="true"><use href="#i-plus"/></svg>
+    </button>
+  </section>
+
+  <!-- ===== Écran d'édition d'une note ===== -->
+  <section id="ecran-edition" class="ecran" hidden>
+    <header class="barre">
+      <button type="button" class="bouton-retour" data-retour>
+        <svg class="icone" aria-hidden="true"><use href="#i-retour"/></svg><span>Retour</span>
+      </button>
+      <button type="button" class="bouton-icone pousse-droite" id="btn-epingler" aria-pressed="false">
+        <svg class="icone" aria-hidden="true"><use href="#i-epingle"/></svg><span>Épingler</span>
+      </button>
+      <button type="button" class="bouton-icone" id="btn-supprimer-note">
+        <svg class="icone" aria-hidden="true"><use href="#i-corbeille"/></svg><span>Supprimer</span>
+      </button>
+    </header>
+    <div class="contenu edition">
+      <!-- Petit texte « Enregistré » : rassure sur l'enregistrement automatique -->
+      <p id="statut-sauvegarde" class="statut" aria-live="polite"></p>
+      <label for="champ-titre" class="visuellement-cache">Titre de la note</label>
+      <input type="text" id="champ-titre" class="champ-titre" placeholder="Titre" autocomplete="off" enterkeyhint="next" maxlength="300">
+
+      <details class="options-note" id="options-note">
+        <summary>Couleur, étiquettes et type</summary>
+        <div class="options-corps">
+          <fieldset class="couleurs" id="choix-couleur">
+            <legend>Couleur : <span id="nom-couleur"></span></legend>
+          </fieldset>
+          <div>
+            <p class="legende">Étiquettes</p>
+            <div id="etiquettes-note" class="puces"></div>
+            <form id="form-etiquette" class="rangee ajout-etiquette">
+              <label for="champ-etiquette" class="visuellement-cache">Nouvelle étiquette</label>
+              <input type="text" id="champ-etiquette" class="saisie" list="liste-etiquettes" placeholder="Nouvelle étiquette" maxlength="30" autocomplete="off" enterkeyhint="done">
+              <datalist id="liste-etiquettes"></datalist>
+              <button type="submit" class="bouton">Ajouter</button>
+            </form>
+          </div>
+          <button type="button" id="btn-changer-type" class="bouton large"></button>
+          <p class="dates" id="dates-note"></p>
+        </div>
+      </details>
+
+      <label for="champ-contenu" class="visuellement-cache">Contenu de la note</label>
+      <textarea id="champ-contenu" class="champ-contenu" placeholder="Écrivez votre note ici…"></textarea>
+
+      <div id="zone-liste" hidden>
+        <ul id="elements-liste" class="elements"></ul>
+        <button type="button" id="btn-ajouter-ligne" class="bouton large">
+          <svg class="icone" aria-hidden="true"><use href="#i-plus"/></svg> Ajouter une ligne
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Corbeille ===== -->
+  <section id="ecran-corbeille" class="ecran" hidden>
+    <header class="barre">
+      <button type="button" class="bouton-retour" data-retour>
+        <svg class="icone" aria-hidden="true"><use href="#i-retour"/></svg><span>Retour</span>
+      </button>
+      <h1>Corbeille</h1>
+    </header>
+    <div class="contenu">
+      <p class="explication">Les notes supprimées restent ici <strong>30 jours</strong>. Vous pouvez les restaurer pendant ce délai. Ensuite, elles sont effacées définitivement.</p>
+      <ul id="liste-corbeille" class="grille"></ul>
+      <p id="corbeille-vide" class="vide" hidden>La corbeille est vide.</p>
+      <button type="button" id="btn-vider-corbeille" class="bouton danger large" hidden>Vider la corbeille</button>
+    </div>
+  </section>
+
+  <!-- ===== Réglages ===== -->
+  <section id="ecran-reglages" class="ecran" hidden>
+    <header class="barre">
+      <button type="button" class="bouton-retour" data-retour>
+        <svg class="icone" aria-hidden="true"><use href="#i-retour"/></svg><span>Retour</span>
+      </button>
+      <h1>Réglages</h1>
+    </header>
+    <div class="contenu">
+
+      <section class="section" aria-labelledby="titre-apparence">
+        <h2 id="titre-apparence">Apparence</h2>
+        <fieldset class="choix">
+          <legend>Thème</legend>
+          <label class="option-radio"><input type="radio" name="theme" value="auto"> Automatique (comme le téléphone)</label>
+          <label class="option-radio"><input type="radio" name="theme" value="clair"> Clair</label>
+          <label class="option-radio"><input type="radio" name="theme" value="sombre"> Sombre</label>
+        </fieldset>
+        <fieldset class="choix">
+          <legend>Taille du texte</legend>
+          <label class="option-radio"><input type="radio" name="taille" value="normale"> Normale</label>
+          <label class="option-radio"><input type="radio" name="taille" value="grande"> Grande</label>
+          <label class="option-radio"><input type="radio" name="taille" value="tres-grande"> Très grande</label>
+        </fieldset>
+      </section>
+
+      <section class="section" aria-labelledby="titre-sauvegarde">
+        <h2 id="titre-sauvegarde">Sauvegarde</h2>
+        <p>Vos notes sont enregistrées uniquement sur cet appareil. Si vous désinstallez l'application ou effacez les données du navigateur, elles disparaissent. Pensez à faire une sauvegarde de temps en temps et à la garder ailleurs (ordinateur, clé USB…).</p>
+        <p id="info-derniere-sauvegarde" class="info"></p>
+        <div class="pile">
+          <button type="button" id="btn-exporter" class="bouton principal large">
+            <svg class="icone" aria-hidden="true"><use href="#i-exporter"/></svg> Exporter toutes mes notes
+          </button>
+          <button type="button" id="btn-importer" class="bouton large">
+            <svg class="icone" aria-hidden="true"><use href="#i-importer"/></svg> Importer un fichier de sauvegarde
+          </button>
+          <input type="file" id="champ-fichier" accept=".json,application/json" hidden>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="titre-mdp">
+        <h2 id="titre-mdp">Mot de passe</h2>
+        <p id="etat-mdp"></p>
+        <div class="pile" id="actions-mdp-inactif">
+          <button type="button" id="btn-activer-mdp" class="bouton principal large">
+            <svg class="icone" aria-hidden="true"><use href="#i-cadenas"/></svg> Activer un mot de passe
+          </button>
+        </div>
+        <div class="pile" id="actions-mdp-actif">
+          <button type="button" id="btn-verrouiller" class="bouton principal large">
+            <svg class="icone" aria-hidden="true"><use href="#i-cadenas"/></svg> Verrouiller maintenant
+          </button>
+          <button type="button" id="btn-modifier-mdp" class="bouton large">Modifier le mot de passe</button>
+          <button type="button" id="btn-desactiver-mdp" class="bouton large">Désactiver le mot de passe</button>
+        </div>
+      </section>
+
+      <section class="section">
+        <button type="button" id="btn-ouvrir-apropos" class="bouton large">
+          <svg class="icone" aria-hidden="true"><use href="#i-info"/></svg> À propos d'Omni-Notes
+        </button>
+      </section>
+    </div>
+  </section>
+
+  <!-- ===== À propos ===== -->
+  <section id="ecran-apropos" class="ecran" hidden>
+    <header class="barre">
+      <button type="button" class="bouton-retour" data-retour>
+        <svg class="icone" aria-hidden="true"><use href="#i-retour"/></svg><span>Retour</span>
+      </button>
+      <h1>À propos</h1>
+    </header>
+    <div class="contenu">
+      <div class="apropos-entete">
+        <img src="icones/icone.svg" alt="" width="80" height="80">
+        <div>
+          <h2>Omni-Notes</h2>
+          <p class="info">Version <span id="numero-version"></span></p>
+        </div>
+      </div>
+      <section class="section">
+        <p>Un bloc-notes et pense-bête simple : notes, listes à cocher, couleurs et étiquettes.</p>
+        <ul class="liste-points">
+          <li><strong>Gratuit</strong> : sans publicité, sans abonnement, sans compte.</li>
+          <li><strong>Hors ligne</strong> : fonctionne sans connexion internet.</li>
+          <li><strong>Privé</strong> : vos notes restent sur votre appareil. Rien n'est envoyé sur internet.</li>
+        </ul>
+      </section>
+      <section class="section">
+        <h2>Auteur</h2>
+        <p>Créé par <strong>Ferrus Dantioch</strong>.</p>
+        <p><a href="https://ferrusdantioch.github.io/omni-systeme/" target="_blank" rel="noopener">Découvrir le portfolio et les autres applications de l'Omni-système</a></p>
+        <p class="info">Réalisé avec l'aide de Claude, l'intelligence artificielle d'Anthropic. L'idée et la conception de l'application sont de Ferrus Dantioch.</p>
+      </section>
+      <section class="section">
+        <h2>Licence</h2>
+        <p>Code : © 2026 Ferrus Dantioch — <a href="https://creativecommons.org/licenses/by-nc-nd/4.0/deed.fr" target="_blank" rel="noopener">Creative Commons BY-NC-ND 4.0</a>. Le logiciel est fourni « en l'état », sans aucune garantie.</p>
+      </section>
+    </div>
+  </section>
+
+  <!-- ===== Petit message temporaire en bas de l'écran ===== -->
+  <div id="message" class="message" role="status" aria-live="polite" hidden>
+    <span id="message-texte"></span>
+    <button type="button" id="message-action" hidden></button>
+  </div>
+
+  <!-- ===== Fenêtre de dialogue générique (confirmation, choix…) ===== -->
+  <dialog id="dialogue" aria-labelledby="dialogue-titre">
+    <form method="dialog" id="dialogue-form" novalidate>
+      <h2 id="dialogue-titre"></h2>
+      <div id="dialogue-message"></div>
+      <div id="dialogue-zone-champ" class="pile" hidden>
+        <label id="dialogue-label" for="dialogue-champ" class="etiquette-champ"></label>
+        <input id="dialogue-champ" class="saisie" autocomplete="off" autocapitalize="off" spellcheck="false">
+      </div>
+      <div id="dialogue-boutons" class="boutons-dialogue"></div>
+    </form>
+  </dialog>
+
+  <!-- ===== Fenêtre du mot de passe (activer / modifier / désactiver) ===== -->
+  <dialog id="dialogue-mdp" aria-labelledby="mdp-titre">
+    <form id="form-mdp" novalidate>
+      <h2 id="mdp-titre"></h2>
+      <div id="mdp-avertissement" class="avertissement">
+        <p><strong>Attention : un mot de passe oublié est irrécupérable.</strong></p>
+        <p>Il n'est enregistré nulle part et personne ne peut le réinitialiser. Si vous l'oubliez, vos notes seront définitivement perdues. Notez-le dans un endroit sûr.</p>
+      </div>
+      <div class="pile" id="zone-mdp-actuel">
+        <label for="mdp-actuel" class="etiquette-champ">Mot de passe actuel</label>
+        <input type="password" id="mdp-actuel" class="saisie" autocomplete="current-password" autocapitalize="off" spellcheck="false">
+      </div>
+      <div class="pile" id="zone-mdp-nouveau">
+        <label for="mdp-nouveau" class="etiquette-champ">Nouveau mot de passe</label>
+        <input type="password" id="mdp-nouveau" class="saisie" autocomplete="new-password" autocapitalize="off" spellcheck="false" aria-describedby="aide-mdp">
+        <p id="aide-mdp" class="aide">Au moins 6 caractères. Une petite phrase facile à retenir est une bonne idée.</p>
+      </div>
+      <div class="pile" id="zone-mdp-confirmation">
+        <label for="mdp-confirmation" class="etiquette-champ">Retapez le nouveau mot de passe</label>
+        <input type="password" id="mdp-confirmation" class="saisie" autocomplete="new-password" autocapitalize="off" spellcheck="false">
+      </div>
+      <label class="case" id="zone-mdp-compris"><input type="checkbox" id="mdp-compris"> J'ai compris : si j'oublie ce mot de passe, mes notes seront perdues.</label>
+      <label class="case"><input type="checkbox" id="mdp-voir"> Afficher les mots de passe</label>
+      <p id="mdp-erreur" class="erreur" role="alert"></p>
+      <div class="boutons-dialogue">
+        <button type="submit" class="bouton principal" id="mdp-valider">Valider</button>
+        <button type="button" class="bouton" id="mdp-annuler">Annuler</button>
+      </div>
+    </form>
+  </dialog>
+
+</body>
+</html>

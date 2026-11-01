@@ -1,0 +1,21 @@
+{
+  "id": "./",
+  "name": "Omni-Notes",
+  "short_name": "Omni-Notes",
+  "description": "Bloc-notes et pense-bête gratuit, sans compte, qui fonctionne hors ligne. Vos notes restent sur votre appareil.",
+  "lang": "fr",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f2efe8",
+  "theme_color": "#f2efe8",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    { "src": "icones/icone-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icones/icone-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icones/icone-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icones/icone.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Icône d'Omni-Notes : une feuille de notes au coin plié, avec une case cochée et des lignes. -->
+  <rect width="512" height="512" rx="112" fill="#2e6b66"/>
+  <path d="M152 104h162l70 70v234a28 28 0 0 1-28 28H152a28 28 0 0 1-28-28V132a28 28 0 0 1 28-28z" fill="#f4efe3"/>
+  <path d="M314 104v52a18 18 0 0 0 18 18h52z" fill="#d8cdb4"/>
+  <rect x="162" y="204" width="52" height="52" rx="11" fill="none" stroke="#2e6b66" stroke-width="10"/>
+  <path d="M175 231l10 10 17-19" fill="none" stroke="#2e6b66" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M236 230h106M166 300h176M166 360h120" fill="none" stroke="#9cb6b1" stroke-width="20" stroke-linecap="round"/>
+</svg>
