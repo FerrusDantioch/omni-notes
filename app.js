@@ -24,7 +24,7 @@ import * as chiffrement from './chiffrement.js';
    0. Constantes et état de l'application
    ===================================================================== */
 
-const VERSION = '1.0.0';
+const VERSION = '1.0.1';
 const JOUR = 24 * 60 * 60 * 1000;            // un jour, en millisecondes
 const DUREE_CORBEILLE = 30 * JOUR;            // durée de conservation dans la corbeille
 const DELAI_RAPPEL = 14 * JOUR;               // rappel de sauvegarde après 14 jours
