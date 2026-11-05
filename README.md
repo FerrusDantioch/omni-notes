@@ -93,7 +93,7 @@ interdites. Le logiciel est fourni « en l'état », sans aucune garantie. Texte
 complet dans le fichier [LICENSE](LICENSE) : le texte officiel en anglais, suivi
 de la traduction française officielle publiée par Creative Commons.
 
-Réalisé avec l'aide de Claude, l'intelligence artificielle d'Anthropic. L'idée
-et la conception de l'application sont de Ferrus Dantioch.
+Réalisé avec l'aide de l'intelligence artificielle. L'idée et la
+conception de l'application sont de Ferrus Dantioch.
 
 Découvrir les autres applications : https://ferrusdantioch.github.io/omni-systeme/
