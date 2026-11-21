@@ -76,6 +76,13 @@ Les notes ne sont jamais touchées par une mise à jour : elles sont rangées à
 3. Confirmez avec **Installer**. L'icône Omni-Notes apparaît avec vos autres
    applications et fonctionne ensuite sans internet.
 
+**Installée avant la version 1.0.2 ?** L'application avait alors la même
+identité que d'autres applications de Ferrus (le navigateur pouvait les
+confondre). Elle continue de marcher. Pour profiter de la correction :
+**exportez d'abord toutes vos notes** (Réglages → Exporter toutes mes notes),
+désinstallez, réinstallez, puis importez le fichier. Désinstaller peut effacer
+les notes : ne sautez pas l'export.
+
 ## Où sont mes notes ? Que faire pour ne pas les perdre ?
 
 Les notes sont enregistrées dans le navigateur du téléphone. Elles disparaissent
