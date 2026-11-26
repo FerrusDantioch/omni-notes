@@ -52,8 +52,15 @@ export function ouvrirBase() {
     demande.onsuccess = () => {
       const base = demande.result;
       // Si une version plus récente de l'application s'ouvre dans un autre
-      // onglet, on ferme proprement celle-ci pour ne pas la bloquer.
-      base.onversionchange = () => base.close();
+      // onglet, on ferme proprement celle-ci et on réinitialise le cache
+      // de promesse pour permettre une réouverture propre.
+      base.onversionchange = () => {
+        base.close();
+        promesseBase = null;
+      };
+      base.onclose = () => {
+        promesseBase = null;
+      };
       resoudre(base);
     };
     demande.onerror = () => {

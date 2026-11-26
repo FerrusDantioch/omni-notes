@@ -60,10 +60,10 @@ L'application est publiée par GitHub Pages depuis la branche `main`, dossier
 racine. Elle se met à jour 1 à 2 minutes après chaque envoi.
 
 **Important :** à chaque modification d'un fichier, changez aussi le numéro de
-version dans `sw.js` (ligne `const VERSION_CACHE = 'omni-notes-v1.0.0';`, par
-exemple en `v1.0.1`) et dans `app.js` (ligne `const VERSION = '1.0.0';`). C'est
-ce qui indique aux téléphones qu'une nouvelle version existe. Elle s'applique
-au lancement suivant de l'application.
+version dans `sw.js` (ligne `const VERSION_CACHE = 'omni-notes-v1.0.3';`, par
+exemple en `v1.0.4`) et dans `app.js` (ligne `const VERSION = '1.0.3';`). C'est
+ce qui indique aux téléphones qu'une nouvelle version existe : un bandeau
+« Mettre à jour » propose alors de l'appliquer sans couper une saisie en cours.
 
 Les notes ne sont jamais touchées par une mise à jour : elles sont rangées à part
 (dans IndexedDB), pas dans les fichiers de l'application.
@@ -90,7 +90,17 @@ si vous désinstallez l'application ou si vous effacez les données de Chrome po
 ce site. **Faites une sauvegarde de temps en temps** (Réglages → Exporter toutes
 mes notes) et gardez le fichier ailleurs (ordinateur, clé USB…).
 
-## Droits et licence
+## Tests automatiques
+
+Les tests ouvrent l'application dans un vrai navigateur (Playwright + Chromium)
+et vérifient le mode hors ligne, les notes, les listes, le chiffrement, les
+sauvegardes et l'absence d'erreurs.
+
+```bash
+node tests/tester.js
+```
+
+## Droits, licence et contact
 
 **Code : © 2026 Ferrus Dantioch — Creative Commons BY-NC-ND 4.0**
 ([résumé de la licence en français](https://creativecommons.org/licenses/by-nc-nd/4.0/deed.fr)).
@@ -102,5 +112,7 @@ de la traduction française officielle publiée par Creative Commons.
 
 Réalisé avec l'aide de l'intelligence artificielle. L'idée et la
 conception de l'application sont de Ferrus Dantioch.
+
+Contact : `omni-systeme.choking513@passmail.net`
 
 Découvrir les autres applications : https://ferrusdantioch.github.io/omni-systeme/

@@ -24,7 +24,7 @@ import * as chiffrement from './chiffrement.js';
    0. Constantes et état de l'application
    ===================================================================== */
 
-const VERSION = '1.0.2';
+const VERSION = '1.0.3';
 const JOUR = 24 * 60 * 60 * 1000;            // un jour, en millisecondes
 const DUREE_CORBEILLE = 30 * JOUR;            // durée de conservation dans la corbeille
 const DELAI_RAPPEL = 14 * JOUR;               // rappel de sauvegarde après 14 jours
@@ -111,7 +111,7 @@ function nouvelId() {
 
 /** Met en minuscules et enlève les accents : « Été » devient « ete ». Pratique pour la recherche. */
 function simplifier(texte) {
-  return texte.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  return texte.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 }
 
 const formatJour = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
@@ -166,8 +166,9 @@ function afficherMessage(texte, { action = null, siAction = null, duree = 6000 }
  * Renvoie { valeur, saisie } (valeur = null si on ferme sans choisir).
  */
 function demander({ titre, message = [], boutons, champ = null }) {
+  const dialogue = $('#dialogue');
+  if (dialogue.open) return Promise.resolve({ valeur: null, saisie: '' });
   return new Promise((resoudre) => {
-    const dialogue = $('#dialogue');
     $('#dialogue-titre').textContent = titre;
 
     const zoneMessage = $('#dialogue-message');
@@ -255,10 +256,40 @@ async function demarrer() {
 }
 
 /** Le « service worker » permet à l'application de fonctionner hors ligne. */
+let inscriptionSw = null;
+let miseAJourDemandee = false;
+
 function enregistrerServiceWorker() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./sw.js').catch((erreur) => console.warn('Service worker non installé', erreur));
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (miseAJourDemandee) location.reload();
+    });
+    navigator.serviceWorker.register('./sw.js')
+      .then(surveillerMisesAJour)
+      .catch((erreur) => console.warn('Service worker non installé', erreur));
   }
+}
+
+function surveillerMisesAJour(inscription) {
+  inscriptionSw = inscription;
+  montrerMiseAJour();
+  inscription.addEventListener('updatefound', () => {
+    const nouveau = inscription.installing;
+    if (!nouveau) return;
+    nouveau.addEventListener('statechange', () => {
+      if (nouveau.state === 'installed') montrerMiseAJour();
+    });
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') inscription.update().catch(() => {});
+  });
+}
+
+function montrerMiseAJour() {
+  const bandeau = $('#bandeau-mise-a-jour');
+  if (!bandeau) return;
+  const prete = !!(inscriptionSw && inscriptionSw.waiting && navigator.serviceWorker.controller);
+  bandeau.hidden = !prete;
 }
 
 /**
@@ -376,7 +407,10 @@ function enFile(travail) {
 }
 
 /** Prépare une note pour le stockage : chiffrée si le mot de passe est actif. */
-async function versStockage(note, cle = etat.cle) {
+async function versStockage(note, cle = etat.cle, { autoriserClair = false } = {}) {
+  if (motDePasseActif() && !cle && !autoriserClair) {
+    throw new Error("Impossible d'enregistrer : application verrouillée.");
+  }
   if (cle) {
     const paquet = await chiffrement.chiffrer(cle, note);
     return { id: note.id, chiffre: true, iv: paquet.iv, donnees: paquet.donnees };
@@ -385,7 +419,8 @@ async function versStockage(note, cle = etat.cle) {
 }
 
 function stockerNote(note) {
-  return enFile(async () => db.ecrire('notes', await versStockage(note)));
+  const cle = etat.cle;
+  return enFile(async () => db.ecrire('notes', await versStockage(note, cle)));
 }
 
 function effacerNoteDuStockage(id) {
@@ -436,6 +471,7 @@ function retour() {
 // Appelé quand on revient en arrière (bouton « Retour » ou bouton du téléphone).
 window.addEventListener('popstate', async (evenement) => {
   if (etat.verrouille || etat.ecran === 'chargement') return;
+  if (!mdpEnCours) document.querySelectorAll('dialog[open]').forEach((d) => d.close());
   if (etat.ecran === 'edition') await quitterEditeur();
 
   const cible = evenement.state || { ecran: 'liste' };
@@ -637,6 +673,7 @@ function rendreElements(idAFocaliser = null) {
 
 function ajouterLigne(position) {
   const note = noteOuverte();
+  if (!note) return;
   const element = { id: nouvelId(), texte: '', coche: false };
   note.elements.splice(position ?? note.elements.length, 0, element);
   rendreElements(element.id);
@@ -645,11 +682,13 @@ function ajouterLigne(position) {
 
 function supprimerLigne(id) {
   const note = noteOuverte();
+  if (!note) return;
   const index = note.elements.findIndex((e) => e.id === id);
   if (index === -1) return;
   note.elements.splice(index, 1);
   const voisine = note.elements[Math.max(0, index - 1)];
   rendreElements(voisine ? voisine.id : null);
+  if (!voisine) $('#btn-ajouter-ligne').focus();
   signalerModification();
 }
 
@@ -657,6 +696,7 @@ function supprimerLigne(id) {
 
 function rendreEpingle() {
   const note = noteOuverte();
+  if (!note) return;
   const bouton = $('#btn-epingler');
   bouton.setAttribute('aria-pressed', String(note.epinglee));
   bouton.querySelector('span').textContent = note.epinglee ? 'Épinglée' : 'Épingler';
@@ -664,6 +704,7 @@ function rendreEpingle() {
 
 function basculerEpingle() {
   const note = noteOuverte();
+  if (!note) return;
   note.epinglee = !note.epinglee;
   rendreEpingle();
   signalerModification();
@@ -672,6 +713,7 @@ function basculerEpingle() {
 
 function rendreCouleurs() {
   const note = noteOuverte();
+  if (!note) return;
   const groupe = $('#choix-couleur');
   groupe.querySelectorAll('.pastille').forEach((p) => p.remove());
   for (const couleur of COULEURS) {
@@ -689,12 +731,14 @@ function rendreCouleurs() {
 
 function appliquerCouleurEditeur() {
   const note = noteOuverte();
+  if (!note) return;
   $('#ecran-edition').dataset.couleur = note.couleur;
   $('#nom-couleur').textContent = COULEURS.find((c) => c.id === note.couleur).nom;
 }
 
 function rendreEtiquettesNote() {
   const note = noteOuverte();
+  if (!note) return;
   const zone = $('#etiquettes-note');
   zone.replaceChildren(...note.etiquettes.map((etiquette) =>
     creer('span', { classe: 'puce etiquette-retirable' }, [
@@ -723,6 +767,7 @@ function ajouterEtiquette(evenement) {
   champ.value = '';
   if (!texte) return;
   const note = noteOuverte();
+  if (!note) return;
   // Si une étiquette identique existe déjà ailleurs (ex. « Courses »), on garde son orthographe.
   const existante = toutesLesEtiquettes().find((t) => simplifier(t) === simplifier(texte));
   note.etiquettes = dedoublonner([...note.etiquettes, existante || texte]);
@@ -732,6 +777,7 @@ function ajouterEtiquette(evenement) {
 
 function rendreBoutonType() {
   const note = noteOuverte();
+  if (!note) return;
   const bouton = $('#btn-changer-type');
   bouton.replaceChildren(
     icone(note.type === 'texte' ? 'liste' : 'texte'),
@@ -741,6 +787,7 @@ function rendreBoutonType() {
 
 async function changerType() {
   const note = noteOuverte();
+  if (!note) return;
   if (note.type === 'texte') {
     // Chaque ligne du texte devient une ligne à cocher.
     const lignes = note.contenu.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -755,7 +802,7 @@ async function changerType() {
         'Transformer',
         false
       );
-      if (!ok) return;
+      if (!ok || noteOuverte() !== note) return;
     }
     note.contenu = note.elements.map((e) => e.texte).filter((t) => t.trim()).join('\n');
     note.elements = [];
@@ -811,12 +858,16 @@ function texteDeRecherche(note) {
 function rendreListe() {
   const actives = notesActives();
   const etiquettes = toutesLesEtiquettes();
-  if (etat.filtreEtiquette && !etiquettes.includes(etat.filtreEtiquette)) etat.filtreEtiquette = null;
+  const filtreSimplifie = etat.filtreEtiquette ? simplifier(etat.filtreEtiquette) : null;
+  if (filtreSimplifie && !etiquettes.some((t) => simplifier(t) === filtreSimplifie)) {
+    etat.filtreEtiquette = null;
+  }
   rendreFiltres(etiquettes);
 
   const recherche = simplifier(etat.recherche.trim());
+  const filtreActif = etat.filtreEtiquette ? simplifier(etat.filtreEtiquette) : null;
   const visibles = actives
-    .filter((n) => !etat.filtreEtiquette || n.etiquettes.includes(etat.filtreEtiquette))
+    .filter((n) => !filtreActif || n.etiquettes.some((t) => simplifier(t) === filtreActif))
     .filter((n) => !recherche || texteDeRecherche(n).includes(recherche))
     .sort((a, b) => b.modifieLe - a.modifieLe);
 
@@ -846,10 +897,11 @@ function rendreListe() {
 function rendreFiltres(etiquettes) {
   const zone = $('#filtres-etiquettes');
   zone.hidden = etiquettes.length === 0;
+  const filtreActif = etat.filtreEtiquette ? simplifier(etat.filtreEtiquette) : null;
   const filtre = (texte, valeur) => creer('button', {
     type: 'button',
     classe: 'filtre',
-    'aria-pressed': String(etat.filtreEtiquette === valeur),
+    'aria-pressed': String(valeur === null ? filtreActif === null : filtreActif === simplifier(valeur)),
     texte,
     onclick: () => { etat.filtreEtiquette = valeur; rendreListe(); },
   });
@@ -937,7 +989,9 @@ function rendreCorbeille() {
 }
 
 async function restaurerNote(note) {
+  if (!etat.notes.includes(note)) return;
   note.supprimeeLe = null;
+  note.modifieLe = Date.now();
   await stockerNote(note);
   if (etat.ecran === 'corbeille') rendreCorbeille();
   if (etat.ecran === 'liste') rendreListe();
@@ -997,50 +1051,59 @@ async function reporterRappel() {
   await sauverPreferences(); // …puis on mémorise le choix
 }
 
+function horodatageNote(note) {
+  return Math.max(note.modifieLe || 0, note.supprimeeLe || 0);
+}
+
 /** Crée un fichier contenant TOUTES les notes (corbeille comprise) et le télécharge. */
 async function exporter() {
-  await enregistrerMaintenant();
-  const notes = etat.notes;
-  const entete = {
-    application: 'omni-notes',
-    format: 1,
-    version: VERSION,
-    exporteLe: new Date().toISOString(),
-    nombreDeNotes: notes.length,
-  };
+  try {
+    await enregistrerMaintenant();
+    const notes = etat.notes;
+    const entete = {
+      application: 'omni-notes',
+      format: 1,
+      version: VERSION,
+      exporteLe: new Date().toISOString(),
+      nombreDeNotes: notes.length,
+    };
 
-  let contenu;
-  if (etat.cle) {
-    // Mot de passe actif : la sauvegarde est chiffrée elle aussi.
-    const paquet = await chiffrement.chiffrer(etat.cle, notes);
-    contenu = { ...entete, chiffre: true, sel: etat.securite.sel, iterations: etat.securite.iterations, iv: paquet.iv, donnees: paquet.donnees };
-  } else {
-    contenu = { ...entete, chiffre: false, notes };
+    let contenu;
+    if (etat.cle) {
+      // Mot de passe actif : la sauvegarde est chiffrée elle aussi.
+      const paquet = await chiffrement.chiffrer(etat.cle, notes);
+      contenu = { ...entete, chiffre: true, sel: etat.securite.sel, iterations: etat.securite.iterations, iv: paquet.iv, donnees: paquet.donnees };
+    } else {
+      contenu = { ...entete, chiffre: false, notes };
+    }
+
+    const aujourdhui = new Date();
+    const deux = (n) => String(n).padStart(2, '0');
+    const nomFichier = `omni-notes-sauvegarde-${aujourdhui.getFullYear()}-${deux(aujourdhui.getMonth() + 1)}-${deux(aujourdhui.getDate())}.json`;
+
+    const fichier = new Blob([JSON.stringify(contenu, null, 2)], { type: 'application/json' });
+    const adresse = URL.createObjectURL(fichier);
+    const lien = creer('a', { href: adresse, download: nomFichier });
+    document.body.append(lien);
+    lien.click();
+    lien.remove();
+    setTimeout(() => URL.revokeObjectURL(adresse), 30000);
+
+    etat.prefs.derniereSauvegarde = Date.now();
+    etat.prefs.rappelReporteJusqua = null;
+    rendreRappel();
+    if (etat.ecran === 'reglages') rendreReglages();
+    await sauverPreferences();
+    afficherMessage(
+      etat.cle
+        ? `Sauvegarde chiffrée téléchargée (${nomFichier}). Il faudra votre mot de passe actuel pour l'importer.`
+        : `Sauvegarde téléchargée (${nomFichier}). Gardez ce fichier en lieu sûr.`,
+      { duree: 9000 }
+    );
+  } catch (erreur) {
+    console.error(erreur);
+    afficherMessage("Impossible d'exporter la sauvegarde.", { duree: 8000 });
   }
-
-  const aujourdhui = new Date();
-  const deux = (n) => String(n).padStart(2, '0');
-  const nomFichier = `omni-notes-sauvegarde-${aujourdhui.getFullYear()}-${deux(aujourdhui.getMonth() + 1)}-${deux(aujourdhui.getDate())}.json`;
-
-  const fichier = new Blob([JSON.stringify(contenu, null, 2)], { type: 'application/json' });
-  const adresse = URL.createObjectURL(fichier);
-  const lien = creer('a', { href: adresse, download: nomFichier });
-  document.body.append(lien);
-  lien.click();
-  lien.remove();
-  setTimeout(() => URL.revokeObjectURL(adresse), 30000);
-
-  etat.prefs.derniereSauvegarde = Date.now();
-  etat.prefs.rappelReporteJusqua = null;
-  rendreRappel();
-  if (etat.ecran === 'reglages') rendreReglages();
-  await sauverPreferences();
-  afficherMessage(
-    etat.cle
-      ? `Sauvegarde chiffrée téléchargée (${nomFichier}). Il faudra votre mot de passe actuel pour l'importer.`
-      : `Sauvegarde téléchargée (${nomFichier}). Gardez ce fichier en lieu sûr.`,
-    { duree: 9000 }
-  );
 }
 
 /** Lit un fichier de sauvegarde et propose de fusionner ou de remplacer. */
@@ -1065,7 +1128,17 @@ async function importerFichier(fichier) {
   }
   if (!Array.isArray(notesBrutes)) { erreurFichier(); return; }
 
-  const importees = notesBrutes.map(normaliserNote).filter(Boolean);
+  // Normalise et dédoublonne par identifiant (en gardant la version la plus récente).
+  const parId = new Map();
+  for (const brute of notesBrutes) {
+    const note = normaliserNote(brute);
+    if (!note) continue;
+    const precedente = parId.get(note.id);
+    if (!precedente || horodatageNote(note) >= horodatageNote(precedente)) {
+      parId.set(note.id, note);
+    }
+  }
+  const importees = [...parId.values()];
   if (importees.length === 0) {
     afficherMessage('Ce fichier ne contient aucune note.', { duree: 6000 });
     return;
@@ -1086,29 +1159,45 @@ async function importerFichier(fichier) {
   });
   if (!choix.valeur) return;
 
-  if (choix.valeur === 'remplacer') {
-    const ok = await confirmer(
-      'Remplacer toutes vos notes ?',
-      `Vos ${pluriel(etat.notes.length, 'note actuelle', 'notes actuelles')} (corbeille comprise) seront effacées définitivement et remplacées par les ${importees.length} du fichier. Cette action est irréversible.`,
-      'Oui, tout remplacer'
-    );
-    if (!ok) return;
-    await remplacerNotes(importees);
-    afficherMessage(`${pluriel(importees.length, 'note importée', 'notes importées')}. Vos anciennes notes ont été remplacées.`, { duree: 8000 });
-  } else {
-    const bilan = await fusionnerNotes(importees);
-    afficherMessage(`Import terminé : ${pluriel(bilan.ajoutees, 'note ajoutée', 'notes ajoutées')}, ${pluriel(bilan.misesAJour, 'mise à jour', 'mises à jour')}, ${pluriel(bilan.inchangees, 'déjà à jour', 'déjà à jour')}.`, { duree: 9000 });
+  try {
+    if (choix.valeur === 'remplacer') {
+      const ok = await confirmer(
+        'Remplacer toutes vos notes ?',
+        `Vos ${pluriel(etat.notes.length, 'note actuelle', 'notes actuelles')} (corbeille comprise) seront effacées définitivement et remplacées par les ${importees.length} du fichier. Cette action est irréversible.`,
+        'Oui, tout remplacer'
+      );
+      if (!ok) return;
+      await remplacerNotes(importees);
+      afficherMessage(`${pluriel(importees.length, 'note importée', 'notes importées')}. Vos anciennes notes ont été remplacées.`, { duree: 8000 });
+    } else {
+      const bilan = await fusionnerNotes(importees);
+      afficherMessage(`Import terminé : ${pluriel(bilan.ajoutees, 'note ajoutée', 'notes ajoutées')}, ${pluriel(bilan.misesAJour, 'mise à jour', 'mises à jour')}, ${pluriel(bilan.inchangees, 'déjà à jour', 'déjà à jour')}.`, { duree: 9000 });
+    }
+    etat.filtreEtiquette = null;
+  } catch (erreur) {
+    console.error(erreur);
+    afficherMessage("L'importation a échoué : impossible d'enregistrer les notes sur cet appareil.", { duree: 9000 });
   }
-  etat.filtreEtiquette = null;
 }
 
 /** Demande le mot de passe d'une sauvegarde chiffrée et la déchiffre. */
 async function dechiffrerSauvegarde(donnees) {
   const iterations = Number(donnees.iterations);
-  if (typeof donnees.sel !== 'string' || !Number.isInteger(iterations) || iterations < 1000 || iterations > 10000000) {
+  if (typeof donnees.sel !== 'string' || typeof donnees.iv !== 'string' || typeof donnees.donnees !== 'string'
+    || !Number.isInteger(iterations) || iterations < 1000 || iterations > 10000000) {
     afficherMessage("Ce fichier de sauvegarde est abîmé et ne peut pas être lu.", { duree: 8000 });
     return null;
   }
+  let selOctets;
+  try {
+    selOctets = chiffrement.depuisBase64(donnees.sel);
+    chiffrement.depuisBase64(donnees.iv);
+    chiffrement.depuisBase64(donnees.donnees);
+  } catch {
+    afficherMessage("Ce fichier de sauvegarde est abîmé et ne peut pas être lu.", { duree: 8000 });
+    return null;
+  }
+
   let message = 'Cette sauvegarde est protégée. Entrez le mot de passe qui était utilisé au moment où elle a été faite.';
   for (;;) {
     const reponse = await demander({
@@ -1123,7 +1212,7 @@ async function dechiffrerSauvegarde(donnees) {
     if (reponse.valeur !== 'ok') return null;
     try {
       afficherMessage('Vérification du mot de passe…', { duree: 3000 });
-      const cle = await chiffrement.deriverCle(reponse.saisie, chiffrement.depuisBase64(donnees.sel), iterations);
+      const cle = await chiffrement.deriverCle(reponse.saisie, selOctets, iterations);
       return await chiffrement.dechiffrer(cle, donnees);
     } catch {
       message = 'Mot de passe incorrect. Réessayez.';
@@ -1137,6 +1226,7 @@ async function remplacerNotes(nouvelles) {
   for (const note of nouvelles) operations.push({ magasin: 'notes', action: 'ecrire', valeur: await versStockage(note) });
   await enFile(() => db.groupe(operations));
   etat.notes = nouvelles;
+  etat.notesIllisibles = 0;
   await purgerCorbeille();
 }
 
@@ -1149,7 +1239,7 @@ async function fusionnerNotes(importees) {
     if (!existante) {
       bilan.ajoutees++;
       aEcrire.push(note);
-    } else if (note.modifieLe > existante.modifieLe) {
+    } else if (horodatageNote(note) > horodatageNote(existante)) {
       bilan.misesAJour++;
       aEcrire.push(note);
     } else {
@@ -1193,17 +1283,20 @@ async function verifierMotDePasse(motDePasse) {
   }
 }
 
+let mdpEnCours = false;
+
 async function deverrouiller(evenement) {
   evenement.preventDefault();
   const champ = $('#champ-verrou');
   const bouton = $('#btn-deverrouiller');
+  const texteBouton = $('#texte-deverrouiller');
   const erreur = $('#erreur-verrou');
   if (!champ.value) { erreur.textContent = 'Entrez votre mot de passe.'; return; }
 
   bouton.disabled = true;
   erreur.textContent = '';
-  const ancienTexte = bouton.lastChild.textContent;
-  bouton.lastChild.textContent = ' Vérification…';
+  const ancienTexte = texteBouton.textContent;
+  texteBouton.textContent = 'Vérification…';
   try {
     const cle = await verifierMotDePasse(champ.value);
     if (!cle) {
@@ -1218,32 +1311,57 @@ async function deverrouiller(evenement) {
     ouvrirApplication();
   } finally {
     bouton.disabled = false;
-    bouton.lastChild.textContent = ancienTexte;
+    texteBouton.textContent = ancienTexte;
   }
 }
 
-/** Verrouille l'application : la clé et les notes sont retirées de la mémoire. */
+/** Verrouille l'application : la clé et les notes sont retirées de la mémoire et du DOM. */
 async function verrouiller() {
   if (!motDePasseActif() || etat.verrouille) return;
-  await enregistrerMaintenant();
-  await enFile(() => {}); // attend la fin des écritures en cours
+  etat.verrouille = true;
   document.querySelectorAll('dialog[open]').forEach((d) => d.close());
-  $('#message').hidden = true;
-  etat.cle = null;
-  etat.notes = [];
-  etat.noteOuverteId = null;
-  // On vide aussi l'affichage, pour qu'aucun texte ne reste visible.
-  $('#liste-notes').replaceChildren();
-  $('#liste-corbeille').replaceChildren();
-  $('#elements-liste').replaceChildren();
-  $('#champ-titre').value = '';
-  $('#champ-contenu').value = '';
-  afficherVerrou();
+  try {
+    if (etat.ecran === 'edition') await quitterEditeur();
+    else await enregistrerMaintenant();
+    await enFile(() => {}); // attend la fin des écritures en cours avant de jeter la clé
+  } catch (erreur) {
+    console.error(erreur);
+  } finally {
+    clearTimeout(minuterieEnregistrement);
+    minuterieEnregistrement = null;
+    noteEnAttente = null;
+    clearTimeout(minuterieMessage);
+    $('#message').hidden = true;
+    $('#message-texte').textContent = '';
+
+    etat.cle = null;
+    etat.notes = [];
+    etat.noteOuverteId = null;
+    etat.recherche = '';
+    etat.filtreEtiquette = null;
+
+    // On vide aussi tout le DOM pouvant contenir des notes ou étiquettes.
+    $('#liste-notes').replaceChildren();
+    $('#liste-corbeille').replaceChildren();
+    $('#filtres-etiquettes').replaceChildren();
+    $('#filtres-etiquettes').hidden = true;
+    $('#etiquettes-note').replaceChildren();
+    $('#liste-etiquettes').replaceChildren();
+    $('#elements-liste').replaceChildren();
+    $('#champ-recherche').value = '';
+    $('#champ-titre').value = '';
+    $('#champ-contenu').value = '';
+    $('#champ-etiquette').value = '';
+    $('#dates-note').textContent = '';
+    $('#statut-sauvegarde').textContent = '';
+    afficherVerrou();
+  }
 }
 
 /** Ouvre la fenêtre du mot de passe. mode = 'activer' | 'modifier' | 'desactiver' */
 function ouvrirDialogueMotDePasse(mode) {
   const dialogue = $('#dialogue-mdp');
+  if (dialogue.open) return;
   dialogue.dataset.mode = mode;
   const titres = { activer: 'Activer un mot de passe', modifier: 'Modifier le mot de passe', desactiver: 'Désactiver le mot de passe' };
   $('#mdp-titre').textContent = titres[mode];
@@ -1261,23 +1379,31 @@ function ouvrirDialogueMotDePasse(mode) {
   $('#mdp-erreur').textContent = '';
   $('#mdp-valider').textContent = mode === 'desactiver' ? 'Désactiver et déchiffrer mes notes' : 'Valider';
   $('#mdp-valider').disabled = false;
+  $('#mdp-annuler').disabled = false;
   dialogue.showModal();
   $(mode === 'activer' ? '#mdp-nouveau' : '#mdp-actuel').focus();
 }
 
 function fermerDialogueMotDePasse() {
+  if (mdpEnCours) return;
   for (const id of ['mdp-actuel', 'mdp-nouveau', 'mdp-confirmation']) $('#' + id).value = '';
   $('#dialogue-mdp').close();
 }
 
 async function validerMotDePasse(evenement) {
   evenement.preventDefault();
+  if (mdpEnCours) return;
   const mode = $('#dialogue-mdp').dataset.mode;
   const erreur = $('#mdp-erreur');
   const actuel = $('#mdp-actuel').value;
   const nouveau = $('#mdp-nouveau').value;
   const confirmation = $('#mdp-confirmation').value;
   erreur.textContent = '';
+
+  if (!window.crypto || !window.crypto.subtle) {
+    erreur.textContent = 'Le chiffrement nécessite une adresse sécurisée (HTTPS ou localhost).';
+    return;
+  }
 
   // 1. Vérifications simples avant de commencer.
   if (mode !== 'activer' && !actuel) { erreur.textContent = 'Entrez votre mot de passe actuel.'; return; }
@@ -1288,8 +1414,11 @@ async function validerMotDePasse(evenement) {
   }
 
   const bouton = $('#mdp-valider');
+  const annuler = $('#mdp-annuler');
   const texteBouton = bouton.textContent;
+  mdpEnCours = true;
   bouton.disabled = true;
+  annuler.disabled = true;
   bouton.textContent = 'Patientez…';
   try {
     // 2. Vérification du mot de passe actuel (modifier / désactiver).
@@ -1301,6 +1430,7 @@ async function validerMotDePasse(evenement) {
     if (mode === 'desactiver') await appliquerChiffrement(null);
     else await appliquerChiffrement(nouveau);
 
+    mdpEnCours = false;
     fermerDialogueMotDePasse();
     rendreReglages();
     const messages = {
@@ -1317,7 +1447,9 @@ async function validerMotDePasse(evenement) {
     console.error(e);
     erreur.textContent = 'Une erreur est survenue. Rien n\'a été modifié.';
   } finally {
+    mdpEnCours = false;
     bouton.disabled = false;
+    annuler.disabled = false;
     bouton.textContent = texteBouton;
   }
 }
@@ -1346,7 +1478,11 @@ async function appliquerChiffrement(motDePasse) {
     }
     const operations = [];
     for (const note of etat.notes) {
-      operations.push({ magasin: 'notes', action: 'ecrire', valeur: await versStockage(note, cle) });
+      operations.push({
+        magasin: 'notes',
+        action: 'ecrire',
+        valeur: await versStockage(note, cle, { autoriserClair: motDePasse === null }),
+      });
     }
     operations.push(securite
       ? { magasin: 'reglages', action: 'ecrire', valeur: securite }
@@ -1384,6 +1520,12 @@ async function toutEffacer() {
   etat.securite = null;
   etat.cle = null;
   etat.notes = [];
+  etat.notesIllisibles = 0;
+  etat.recherche = '';
+  etat.filtreEtiquette = null;
+  $('#champ-recherche').value = '';
+  const oubli = document.querySelector('#ecran-verrou details.oubli');
+  if (oubli) oubli.open = false;
   history.replaceState({ ecran: 'liste' }, '');
   ouvrirApplication();
   afficherMessage('Tout a été effacé. Vous pouvez recommencer ou importer une sauvegarde depuis les Réglages.', { duree: 9000 });
@@ -1415,9 +1557,15 @@ function rendreReglages() {
     : 'Dernière sauvegarde : jamais.';
 
   const actif = motDePasseActif();
-  $('#etat-mdp').textContent = actif
-    ? 'Le mot de passe est activé : vos notes sont chiffrées et l\'application se verrouille au lancement, ainsi qu\'après 5 minutes en arrière-plan.'
-    : 'Aucun mot de passe. Vous pouvez en activer un pour chiffrer vos notes et verrouiller l\'application. C\'est facultatif.';
+  const cryptoDisponible = Boolean(window.crypto && window.crypto.subtle);
+  $('#btn-activer-mdp').disabled = !cryptoDisponible;
+  if (!cryptoDisponible && !actif) {
+    $('#etat-mdp').textContent = 'Le chiffrement par mot de passe nécessite une adresse sécurisée (HTTPS ou localhost).';
+  } else {
+    $('#etat-mdp').textContent = actif
+      ? 'Le mot de passe est activé : vos notes sont chiffrées et l\'application se verrouille au lancement, ainsi qu\'après 5 minutes en arrière-plan.'
+      : 'Aucun mot de passe. Vous pouvez en activer un pour chiffrer vos notes et verrouiller l\'application. C\'est facultatif.';
+  }
   $('#actions-mdp-actif').hidden = !actif;
   $('#actions-mdp-inactif').hidden = actif;
 }
@@ -1431,6 +1579,14 @@ function brancherEvenements() {
   document.querySelectorAll('[data-retour]').forEach((b) => b.addEventListener('click', retour));
 
   // Liste
+  $('#btn-mise-a-jour').addEventListener('click', async (e) => {
+    if (!inscriptionSw || !inscriptionSw.waiting) return;
+    miseAJourDemandee = true;
+    e.currentTarget.disabled = true;
+    e.currentTarget.textContent = 'Mise à jour…';
+    await enregistrerMaintenant();
+    inscriptionSw.waiting.postMessage({ type: 'activer' });
+  });
   $('#btn-nouvelle-note').addEventListener('click', choisirTypeNouvelleNote);
   $('#btn-ouvrir-corbeille').addEventListener('click', async () => { await purgerCorbeille(); allerA('corbeille'); });
   $('#btn-ouvrir-reglages').addEventListener('click', () => allerA('reglages'));
@@ -1439,11 +1595,17 @@ function brancherEvenements() {
   $('#rappel-plus-tard').addEventListener('click', reporterRappel);
 
   // Édition
-  $('#champ-titre').addEventListener('input', (e) => { noteOuverte().titre = e.target.value; signalerModification(); });
+  $('#champ-titre').addEventListener('input', (e) => {
+    const note = noteOuverte();
+    if (!note) return;
+    note.titre = e.target.value;
+    signalerModification();
+  });
   $('#champ-titre').addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;
     e.preventDefault();
     const note = noteOuverte();
+    if (!note) return;
     if (note.type === 'texte') $('#champ-contenu').focus();
     else {
       const premier = $('#elements-liste .element-texte');
@@ -1451,9 +1613,14 @@ function brancherEvenements() {
     }
   });
   $('#champ-contenu').addEventListener('input', (e) => {
-    noteOuverte().contenu = e.target.value;
+    const note = noteOuverte();
+    if (!note) return;
+    note.contenu = e.target.value;
     ajusterHauteur(e.target);
     signalerModification();
+  });
+  window.addEventListener('resize', () => {
+    if (etat.ecran === 'edition') ajusterHauteur($('#champ-contenu'));
   });
   $('#btn-ajouter-ligne').addEventListener('click', () => ajouterLigne());
   $('#btn-epingler').addEventListener('click', basculerEpingle);
@@ -1491,7 +1658,8 @@ function brancherEvenements() {
   // Fenêtre du mot de passe
   $('#form-mdp').addEventListener('submit', validerMotDePasse);
   $('#mdp-annuler').addEventListener('click', fermerDialogueMotDePasse);
-  $('#dialogue-mdp').addEventListener('cancel', () => {
+  $('#dialogue-mdp').addEventListener('cancel', (e) => {
+    if (mdpEnCours) { e.preventDefault(); return; }
     for (const id of ['mdp-actuel', 'mdp-nouveau', 'mdp-confirmation']) $('#' + id).value = '';
   });
   $('#mdp-voir').addEventListener('change', (e) => {
@@ -1512,9 +1680,12 @@ function brancherEvenements() {
     if (document.visibilityState === 'hidden') {
       enregistrerMaintenant();
       etat.cacheeDepuis = Date.now();
-    } else if (etat.cacheeDepuis && Date.now() - etat.cacheeDepuis > DELAI_VERROU_AUTO) {
+    } else {
+      const depuis = etat.cacheeDepuis;
       etat.cacheeDepuis = null;
-      verrouiller();
+      if (depuis && Date.now() - depuis > DELAI_VERROU_AUTO) {
+        verrouiller();
+      }
     }
   });
   window.addEventListener('pagehide', () => { enregistrerMaintenant(); });

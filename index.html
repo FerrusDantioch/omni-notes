@@ -72,7 +72,7 @@
         <label class="case"><input type="checkbox" id="voir-verrou"> Afficher le mot de passe</label>
         <p id="erreur-verrou" class="erreur" role="alert"></p>
         <button type="submit" class="bouton principal large" id="btn-deverrouiller">
-          <svg class="icone" aria-hidden="true"><use href="#i-cadenas"/></svg> Déverrouiller
+          <svg class="icone" aria-hidden="true"><use href="#i-cadenas"/></svg> <span id="texte-deverrouiller">Déverrouiller</span>
         </button>
       </form>
       <details class="oubli">
@@ -96,6 +96,14 @@
       </button>
     </header>
     <div class="contenu">
+      <!-- Bandeau de mise à jour (aucun rechargement par surprise) -->
+      <div id="bandeau-mise-a-jour" class="rappel" role="status" hidden>
+        <p>Une nouvelle version d'Omni-Notes est prête. Vos notes restent intactes.</p>
+        <div class="rangee">
+          <button type="button" id="btn-mise-a-jour" class="bouton principal">Mettre à jour</button>
+        </div>
+      </div>
+
       <!-- Rappel discret de sauvegarde -->
       <div id="rappel-sauvegarde" class="rappel" hidden>
         <p id="rappel-texte"></p>
@@ -284,12 +292,17 @@
       <section class="section">
         <h2>Auteur</h2>
         <p>Créé par <strong>Ferrus Dantioch</strong>.</p>
-        <p><a href="https://ferrusdantioch.github.io/omni-systeme/" target="_blank" rel="noopener">Découvrir le portfolio et les autres applications de l'Omni-système</a></p>
+        <p><a href="https://ferrusdantioch.github.io/omni-systeme/" target="_blank" rel="noopener noreferrer">Découvrir le portfolio et les autres applications de l'Omni-système</a></p>
         <p class="info">Réalisé avec l'aide de l'intelligence artificielle. L'idée et la conception de l'application sont de Ferrus Dantioch.</p>
       </section>
       <section class="section">
         <h2>Licence</h2>
-        <p>Code : © 2026 Ferrus Dantioch — <a href="https://creativecommons.org/licenses/by-nc-nd/4.0/deed.fr" target="_blank" rel="noopener">Creative Commons BY-NC-ND 4.0</a>. Le logiciel est fourni « en l'état », sans aucune garantie.</p>
+        <p>Code : © 2026 Ferrus Dantioch — <a href="https://creativecommons.org/licenses/by-nc-nd/4.0/deed.fr" target="_blank" rel="noopener noreferrer">Creative Commons BY-NC-ND 4.0</a> (Attribution - Pas d'Utilisation Commerciale - Pas de Modification 4.0 International) : partage autorisé à l'identique en citant l'auteur, sans usage commercial ni modification ni œuvre dérivée. Le logiciel est fourni « en l'état », sans aucune garantie.</p>
+      </section>
+      <section class="section">
+        <h2>Contact</h2>
+        <p>Une idée, une remarque, un souci ? Vos retours sont les bienvenus : <a href="mailto:omni-systeme.choking513@passmail.net?subject=Retour%20sur%20Omni-Notes">omni-systeme.choking513@passmail.net</a></p>
+        <p class="info note-installation"><strong>Installation sur Android :</strong> si Chrome indique « Cette appli est déjà installée » alors qu'elle ne l'est pas, c'est une limite de Chrome quand une autre application de ce site est déjà installée. Utilisez un autre navigateur (Brave, par exemple), ou choisissez « Créer un raccourci ».</p>
       </section>
     </div>
   </section>
