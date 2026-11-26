@@ -13,7 +13,7 @@
    téléphones qu'une nouvelle version est disponible.
    ===================================================================== */
 
-const VERSION_CACHE = 'omni-notes-v1.0.3';
+const VERSION_CACHE = 'omni-notes-v1.1.0';
 
 // La liste de tous les fichiers nécessaires pour fonctionner hors ligne.
 const FICHIERS = [

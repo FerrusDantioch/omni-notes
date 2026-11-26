@@ -12,27 +12,40 @@ votre appareil et rien n'est envoyé sur internet.
 
 - **Notes texte** : un titre et un contenu, enregistrés automatiquement pendant
   la frappe (aucun bouton « Enregistrer » à chercher).
-- **Listes à cocher** : cases à cocher, ajout et suppression de lignes. La touche
+- **Listes à cocher** : cases à cocher, ajout, réorganisation (`↑` / `↓`) et suppression
+  de lignes, compteur de progression sur les cartes (`X / Y cochés`), actions rapides
+  (masquer/afficher les cochés, tout décocher, retirer les cochés). La touche
   « Entrée » crée une nouvelle ligne. Une note texte peut devenir une liste, et
   inversement.
+- **Modèles de notes** : 4 modèles intégrés (Réunion, Suivi médical, Liste de valise,
+  Liste de courses) et possibilité d'enregistrer vos propres modèles personnalisés
+  (chiffrés automatiquement si un mot de passe est actif).
+- **Mode lecture seule** : empêche toute modification accidentelle tout en rendant
+  cliquables les liens web (`https://`), adresses e-mail et numéros de téléphone,
+  avec mise en forme légère (`#`, `##`, `-`, `**gras**`).
 - **Organisation** : recherche (sans tenir compte des accents ni des majuscules),
-  épinglage en haut de la liste, six couleurs douces et des étiquettes, avec un
-  filtre par étiquette.
+  tri personnalisable (modification, création, titre, couleur), épinglage en haut de
+  la liste, six couleurs douces, étiquettes avec filtre dédié et **Archives**
+  distinctes de la corbeille.
 - **Corbeille** : une note supprimée y reste 30 jours. On peut la restaurer, ou
   l'effacer tout de suite (après confirmation). Après 30 jours, elle est effacée
   définitivement, automatiquement.
-- **Sauvegarde** : export de toutes les notes dans un fichier `.json`, puis import
-  de ce fichier au choix en **fusionnant** (la version la plus récente de chaque
-  note est gardée) ou en **remplaçant** tout (avec double confirmation). Un rappel
-  discret apparaît si aucune sauvegarde n'a été faite depuis 14 jours.
+- **Sauvegarde et export** : export de toutes les notes (y compris archives et
+  modèles) dans un fichier `.json`, puis import avec assistant **« Comparer avant de
+  fusionner »** ou remplacement complet (avec confirmation). Un rappel discret
+  apparaît si aucune sauvegarde n'a été faite depuis 14 jours. Export unitaire en
+  `.txt` (Omni-Texte), `.md` (Markdown) et partage / copie rapide.
 - **Mot de passe optionnel** : activable, modifiable et désactivable dans les
-  réglages. Quand il est activé, les notes sont **chiffrées** (PBKDF2 avec
-  600 000 itérations + AES-GCM 256 bits, grâce à la Web Crypto API du
-  navigateur). Un écran de déverrouillage apparaît au lancement, et après
-  5 minutes passées en arrière-plan. Les sauvegardes exportées sont alors
-  chiffrées elles aussi.
+  réglages. Quand il est activé, les notes et modèles personnalisés sont **chiffrés**
+  (PBKDF2 avec 600 000 itérations + AES-GCM 256 bits, grâce à la Web Crypto API du
+  navigateur). Bouton de verrouillage rapide, déverrouillage au lancement, après
+  5 minutes en arrière-plan ou après un délai d'inactivité configurable (0, 5, 15 ou
+  30 minutes). Les sauvegardes exportées sont alors chiffrées elles aussi.
   ⚠️ **Un mot de passe oublié est irrécupérable** : il n'est enregistré nulle
   part. La seule solution est alors de tout effacer et de repartir de zéro.
+- **Raccourcis clavier (ordinateur)** : `Ctrl+K` / `Cmd+K` (rechercher), `Alt+N` /
+  `Ctrl+Maj+N` (nouvelle note), `Ctrl+S` / `Cmd+S` (enregistrer), `Échap` (effacer
+  la recherche).
 - **Réglages** : thème clair, sombre ou automatique, et trois tailles de texte.
 - **Confort** : aucune animation, aucun son, aucun clignotement, couleurs douces,
   gros boutons, le bouton « retour » du téléphone fonctionne partout.
@@ -60,8 +73,8 @@ L'application est publiée par GitHub Pages depuis la branche `main`, dossier
 racine. Elle se met à jour 1 à 2 minutes après chaque envoi.
 
 **Important :** à chaque modification d'un fichier, changez aussi le numéro de
-version dans `sw.js` (ligne `const VERSION_CACHE = 'omni-notes-v1.0.3';`, par
-exemple en `v1.0.4`) et dans `app.js` (ligne `const VERSION = '1.0.3';`). C'est
+version dans `sw.js` (ligne `const VERSION_CACHE = 'omni-notes-v1.1.0';`, par
+exemple en `v1.1.1`) et dans `app.js` (ligne `const VERSION = '1.1.0';`). C'est
 ce qui indique aux téléphones qu'une nouvelle version existe : un bandeau
 « Mettre à jour » propose alors de l'appliquer sans couper une saisie en cours.
 

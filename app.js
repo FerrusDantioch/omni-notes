@@ -24,7 +24,7 @@ import * as chiffrement from './chiffrement.js';
    0. Constantes et état de l'application
    ===================================================================== */
 
-const VERSION = '1.0.3';
+const VERSION = '1.1.0';
 const JOUR = 24 * 60 * 60 * 1000;            // un jour, en millisecondes
 const DUREE_CORBEILLE = 30 * JOUR;            // durée de conservation dans la corbeille
 const DELAI_RAPPEL = 14 * JOUR;               // rappel de sauvegarde après 14 jours
@@ -34,6 +34,8 @@ const DELAI_ENREGISTREMENT = 500;             // on enregistre 0,5 s après la d
 const LONGUEUR_MIN_MDP = 6;
 const TEXTE_VERIFICATION = 'omni-notes';      // sert à vérifier que le mot de passe est bon
 const CLE_APPARENCE = 'omni-notes-apparence'; // copie du thème pour l'afficher sans attendre
+const TRIS_VALIDES = ['modification', 'creation', 'titre', 'couleur'];
+const DELAIS_INACTIVITE = [0, 5, 15, 30];
 
 const COULEURS = [
   { id: 'aucune', nom: 'sans couleur' },
@@ -45,14 +47,65 @@ const COULEURS = [
   { id: 'violet', nom: 'violet' },
 ];
 
+const MODELES_INTEGRES = [
+  {
+    id: 'modele-reunion',
+    nom: 'Réunion',
+    type: 'texte',
+    titre: 'Réunion',
+    contenu: 'Date :\nParticipants :\n\nOrdre du jour :\n- \n\nDécisions :\n- \n\nActions à suivre :\n- ',
+    couleur: 'bleu',
+    etiquettes: [],
+  },
+  {
+    id: 'modele-suivi-medical',
+    nom: 'Suivi médical',
+    type: 'texte',
+    titre: 'Suivi médical',
+    contenu: 'Date :\nProfessionnel :\n\nMotif / observations :\n\nTraitement / consignes :\n\nProchain rendez-vous :',
+    couleur: 'vert',
+    etiquettes: [],
+  },
+  {
+    id: 'modele-valise',
+    nom: 'Liste de valise',
+    type: 'liste',
+    titre: 'Liste de valise',
+    elements: [
+      { texte: 'Papiers et billets', coche: false },
+      { texte: 'Téléphone et chargeur', coche: false },
+      { texte: 'Vêtements', coche: false },
+      { texte: 'Trousse de toilette', coche: false },
+      { texte: 'Médicaments', coche: false },
+    ],
+    couleur: 'orange',
+    etiquettes: [],
+  },
+  {
+    id: 'modele-courses',
+    nom: 'Liste de courses',
+    type: 'liste',
+    titre: 'Liste de courses',
+    elements: [
+      { texte: 'Pain', coche: false },
+      { texte: 'Lait', coche: false },
+      { texte: 'Fruits et légumes', coche: false },
+    ],
+    couleur: 'jaune',
+    etiquettes: ['Courses'],
+  },
+];
+
 // Préférences par défaut (enregistrées dans le tiroir « reglages »).
 const PREFERENCES_DEFAUT = {
   cle: 'preferences',
-  theme: 'auto',              // 'auto' | 'clair' | 'sombre'
-  taille: 'normale',          // 'normale' | 'grande' | 'tres-grande'
-  derniereSauvegarde: null,   // date du dernier export
-  premiereUtilisation: null,  // date du tout premier lancement
-  rappelReporteJusqua: null,  // date jusqu'à laquelle le rappel est mis en pause
+  theme: 'auto',                  // 'auto' | 'clair' | 'sombre'
+  taille: 'normale',              // 'normale' | 'grande' | 'tres-grande'
+  tri: 'modification',            // 'modification' | 'creation' | 'titre' | 'couleur'
+  verrouInactiviteMinutes: 0,    // 0 | 5 | 15 | 30
+  derniereSauvegarde: null,       // date du dernier export
+  premiereUtilisation: null,      // date du tout premier lancement
+  rappelReporteJusqua: null,      // date jusqu'à laquelle le rappel est mis en pause
 };
 
 // « etat » regroupe tout ce que l'application a en mémoire.
@@ -62,8 +115,10 @@ const etat = {
   cle: null,             // clé de chiffrement en mémoire, quand c'est déverrouillé
   verrouille: false,
   notes: [],             // toutes les notes, déchiffrées, en mémoire
+  modeles: [],           // modèles personnalisés, déchiffrés, en mémoire
   notesIllisibles: 0,    // notes abîmées qu'on n'a pas pu lire
   noteOuverteId: null,   // identifiant de la note en cours d'édition
+  masquerCoches: false,  // masquer temporairement les lignes cochées dans la note ouverte
   ecran: 'chargement',
   recherche: '',
   filtreEtiquette: null,
@@ -227,6 +282,12 @@ async function demarrer() {
     await db.ouvrirBase();
     const prefs = await db.lire('reglages', 'preferences');
     etat.prefs = { ...PREFERENCES_DEFAUT, ...(prefs || {}) };
+    if (!TRIS_VALIDES.includes(etat.prefs.tri)) etat.prefs.tri = PREFERENCES_DEFAUT.tri;
+    if (!DELAIS_INACTIVITE.includes(Number(etat.prefs.verrouInactiviteMinutes))) {
+      etat.prefs.verrouInactiviteMinutes = PREFERENCES_DEFAUT.verrouInactiviteMinutes;
+    } else {
+      etat.prefs.verrouInactiviteMinutes = Number(etat.prefs.verrouInactiviteMinutes);
+    }
     if (!etat.prefs.premiereUtilisation) {
       etat.prefs.premiereUtilisation = Date.now();
       await sauverPreferences();
@@ -309,7 +370,7 @@ function motDePasseActif() {
   return Boolean(etat.securite && etat.securite.actif);
 }
 
-/** Lit toutes les notes du stockage (et les déchiffre si besoin). */
+/** Lit toutes les notes et modèles du stockage (et les déchiffre si besoin). */
 async function chargerNotes() {
   const enregistrements = await db.lireTout('notes');
   const notes = [];
@@ -329,12 +390,27 @@ async function chargerNotes() {
   }
   etat.notes = notes;
   etat.notesIllisibles = illisibles;
+  await chargerModeles();
   await purgerCorbeille();
+}
+
+async function chargerModeles() {
+  try {
+    const reg = await db.lire('reglages', 'modeles');
+    if (!reg) { etat.modeles = []; return; }
+    const brut = reg.chiffre
+      ? await chiffrement.dechiffrer(etat.cle, reg)
+      : reg.liste;
+    etat.modeles = Array.isArray(brut) ? brut.map(normaliserModele).filter(Boolean) : [];
+  } catch {
+    etat.modeles = [];
+  }
 }
 
 /** Affiche l'application une fois les notes chargées. */
 function ouvrirApplication() {
   etat.verrouille = false;
+  reinitialiserMinuterieInactivite(true);
   afficherEcran('liste');
   if (etat.notesIllisibles > 0) {
     afficherMessage(`${pluriel(etat.notesIllisibles, 'note n\'a pas pu être lue', 'notes n\'ont pas pu être lues')}. Elles restent conservées sur l'appareil.`, { duree: 10000 });
@@ -367,11 +443,34 @@ function normaliserNote(source) {
         coche: e.coche === true,
       })),
     epinglee: source.epinglee === true,
+    archivee: source.archivee === true,
+    lectureSeule: source.lectureSeule === true,
     couleur: COULEURS.some((c) => c.id === source.couleur) ? source.couleur : 'aucune',
     etiquettes: dedoublonner(etiquettes.filter((t) => typeof t === 'string').map(nettoyerEtiquette).filter(Boolean)),
     creeLe: date(source.creeLe, maintenant),
     modifieLe: date(source.modifieLe, maintenant),
     supprimeeLe: Number.isFinite(source.supprimeeLe) ? source.supprimeeLe : null,
+  };
+}
+
+function normaliserModele(source) {
+  if (!source || typeof source !== 'object') return null;
+  const texte = (valeur) => (typeof valeur === 'string' ? valeur : '');
+  const nom = texte(source.nom).trim().slice(0, 80);
+  if (!nom) return null;
+  const etiquettes = Array.isArray(source.etiquettes) ? source.etiquettes : [];
+  const elements = Array.isArray(source.elements) ? source.elements : [];
+  return {
+    id: typeof source.id === 'string' && source.id ? source.id.slice(0, 100) : nouvelId(),
+    nom,
+    type: source.type === 'liste' ? 'liste' : 'texte',
+    titre: texte(source.titre),
+    contenu: texte(source.contenu),
+    elements: elements
+      .filter((e) => e && typeof e === 'object')
+      .map((e) => ({ texte: texte(e.texte), coche: false })),
+    couleur: COULEURS.some((c) => c.id === source.couleur) ? source.couleur : 'aucune',
+    etiquettes: dedoublonner(etiquettes.filter((t) => typeof t === 'string').map(nettoyerEtiquette).filter(Boolean)),
   };
 }
 
@@ -431,6 +530,22 @@ function sauverPreferences() {
   return db.ecrire('reglages', { ...etat.prefs });
 }
 
+async function versStockageModeles(modeles = etat.modeles, cle = etat.cle, { autoriserClair = false } = {}) {
+  if (motDePasseActif() && !cle && !autoriserClair) {
+    throw new Error("Impossible d'enregistrer les modèles : application verrouillée.");
+  }
+  if (cle) {
+    const paquet = await chiffrement.chiffrer(cle, modeles);
+    return { cle: 'modeles', chiffre: true, iv: paquet.iv, donnees: paquet.donnees };
+  }
+  return { cle: 'modeles', chiffre: false, liste: JSON.parse(JSON.stringify(modeles)) };
+}
+
+function sauverModeles() {
+  const cle = etat.cle;
+  return enFile(async () => db.ecrire('reglages', await versStockageModeles(etat.modeles, cle)));
+}
+
 /* =====================================================================
    2. Navigation entre les écrans
    ---------------------------------------------------------------------
@@ -439,7 +554,7 @@ function sauverPreferences() {
    exactement comme notre bouton « Retour ».
    ===================================================================== */
 
-const ECRANS = ['chargement', 'verrou', 'liste', 'edition', 'corbeille', 'reglages', 'apropos'];
+const ECRANS = ['chargement', 'verrou', 'liste', 'edition', 'corbeille', 'archives', 'reglages', 'apropos'];
 
 function montrerEcran(nom) {
   for (const ecran of ECRANS) {
@@ -452,6 +567,7 @@ function montrerEcran(nom) {
 function afficherEcran(nom) {
   if (nom === 'liste') rendreListe();
   if (nom === 'corbeille') rendreCorbeille();
+  if (nom === 'archives') rendreArchives();
   if (nom === 'reglages') rendreReglages();
   montrerEcran(nom);
   if (nom === 'edition') ajusterHauteur($('#champ-contenu'));
@@ -479,6 +595,7 @@ window.addEventListener('popstate', async (evenement) => {
     const note = trouverNote(cible.id);
     if (!note || note.supprimeeLe) { afficherEcran('liste'); return; }
     etat.noteOuverteId = note.id;
+    etat.masquerCoches = false;
     remplirEditeur();
   }
   afficherEcran(ECRANS.includes(cible.ecran) && cible.ecran !== 'verrou' ? cible.ecran : 'liste');
@@ -511,10 +628,80 @@ async function choisirTypeNouvelleNote() {
     boutons: [
       { texte: 'Une note texte', valeur: 'texte', style: 'principal' },
       { texte: 'Une liste à cocher', valeur: 'liste', style: 'principal' },
+      { texte: 'À partir d’un modèle…', valeur: 'modele' },
       { texte: 'Annuler', valeur: null },
     ],
   });
-  if (reponse.valeur) creerNote(reponse.valeur);
+  if (reponse.valeur === 'modele') await choisirModele();
+  else if (reponse.valeur) creerNote(reponse.valeur);
+}
+
+function choisirModele() {
+  const dialogue = $('#dialogue');
+  if (dialogue.open) return Promise.resolve();
+  return new Promise((resoudre) => {
+    $('#dialogue-titre').textContent = 'Choisir un modèle';
+    $('#dialogue-zone-champ').hidden = true;
+    $('#dialogue-champ').value = '';
+
+    const zoneMessage = $('#dialogue-message');
+    const liste = creer('div', { classe: 'liste-modeles' });
+
+    const fermerAvec = (action) => {
+      dialogue.close();
+      Promise.resolve().then(action).finally(resoudre);
+    };
+
+    const ajouterGroupe = (titreGroupe, modeles, personnalise) => {
+      if (modeles.length === 0) return;
+      liste.append(creer('p', { classe: 'titre-section', texte: titreGroupe }));
+      for (const modele of modeles) {
+        const bouton = creer('button', {
+          type: 'button',
+          classe: 'bouton bouton-modele',
+          texte: modele.nom,
+          onclick: () => fermerAvec(() => creerNoteDepuisModele(modele)),
+        });
+        if (personnalise) {
+          const btnSupprimer = creer('button', {
+            type: 'button',
+            classe: 'bouton danger bouton-supprimer-modele',
+            'aria-label': `Supprimer le modèle ${modele.nom}`,
+            onclick: () => fermerAvec(async () => {
+              const ok = await confirmer(
+                'Supprimer ce modèle ?',
+                `Le modèle « ${modele.nom} » sera supprimé. Vos notes existantes restent intactes.`,
+                'Supprimer'
+              );
+              if (ok) {
+                etat.modeles = etat.modeles.filter((m) => m.id !== modele.id);
+                await sauverModeles();
+                afficherMessage('Modèle supprimé.', { duree: 3000 });
+              }
+              await choisirModele();
+            }),
+          }, [icone('corbeille')]);
+          liste.append(creer('div', { classe: 'ligne-modele' }, [bouton, btnSupprimer]));
+        } else {
+          liste.append(creer('div', { classe: 'ligne-modele' }, [bouton]));
+        }
+      }
+    };
+
+    ajouterGroupe('Modèles intégrés', MODELES_INTEGRES, false);
+    ajouterGroupe('Mes modèles', etat.modeles, true);
+    zoneMessage.replaceChildren(liste);
+
+    $('#dialogue-boutons').replaceChildren(
+      creer('button', { type: 'submit', value: 'annuler', classe: 'bouton', texte: 'Annuler' })
+    );
+
+    dialogue.returnValue = '';
+    dialogue.addEventListener('close', () => {
+      if (dialogue.returnValue === 'annuler' || dialogue.returnValue === '') resoudre();
+    }, { once: true });
+    dialogue.showModal();
+  });
 }
 
 function creerNote(type) {
@@ -528,8 +715,66 @@ function creerNote(type) {
   $('#champ-titre').focus();
 }
 
+function creerNoteDepuisModele(modele) {
+  const maintenant = Date.now();
+  const note = normaliserNote({
+    id: nouvelId(),
+    type: modele.type,
+    titre: modele.titre || modele.nom,
+    contenu: modele.contenu || '',
+    elements: Array.isArray(modele.elements)
+      ? modele.elements.map((e) => ({ id: nouvelId(), texte: e.texte || '', coche: false }))
+      : [],
+    couleur: modele.couleur || 'aucune',
+    etiquettes: Array.isArray(modele.etiquettes) ? [...modele.etiquettes] : [],
+    creeLe: maintenant,
+    modifieLe: maintenant,
+  });
+  if (note.type === 'liste' && note.elements.length === 0) {
+    note.elements = [{ id: nouvelId(), texte: '', coche: false }];
+  }
+  etat.notes.push(note);
+  ouvrirNote(note.id);
+  signalerModification();
+  $('#champ-titre').focus();
+}
+
+async function enregistrerCommeModele() {
+  const note = noteOuverte();
+  if (!note) return;
+  const reponse = await demander({
+    titre: 'Enregistrer comme modèle',
+    message: 'Donnez un nom à ce modèle pour le réutiliser lors de la création d’une note.',
+    champ: { label: 'Nom du modèle', type: 'text' },
+    boutons: [
+      { texte: 'Enregistrer', valeur: 'ok', style: 'principal' },
+      { texte: 'Annuler', valeur: null },
+    ],
+  });
+  if (reponse.valeur !== 'ok') return;
+  const nom = reponse.saisie.trim().slice(0, 80);
+  if (!nom) {
+    afficherMessage('Entrez un nom pour enregistrer le modèle.', { duree: 4000 });
+    return;
+  }
+  const modele = normaliserModele({
+    id: nouvelId(),
+    nom,
+    type: note.type,
+    titre: note.titre,
+    contenu: note.contenu,
+    elements: note.elements.map((e) => ({ texte: e.texte, coche: false })),
+    couleur: note.couleur,
+    etiquettes: [...note.etiquettes],
+  });
+  etat.modeles.push(modele);
+  await sauverModeles();
+  afficherMessage(`Modèle « ${nom} » enregistré.`, { duree: 4000 });
+}
+
 function ouvrirNote(id) {
   etat.noteOuverteId = id;
+  etat.masquerCoches = false;
   remplirEditeur();
   allerA('edition', { id });
 }
@@ -538,17 +783,41 @@ function ouvrirNote(id) {
 function remplirEditeur() {
   const note = noteOuverte();
   if (!note) return;
+  const ro = note.lectureSeule === true;
   $('#champ-titre').value = note.titre;
+  $('#champ-titre').readOnly = ro;
   $('#champ-contenu').value = note.contenu;
-  $('#champ-contenu').hidden = note.type !== 'texte';
-  $('#zone-liste').hidden = note.type !== 'liste';
+  $('#bandeau-lecture-seule').hidden = !ro;
+
+  if (note.type === 'texte') {
+    $('#champ-contenu').hidden = ro;
+    $('#vue-lecture').hidden = !ro;
+    $('#zone-liste').hidden = true;
+    if (ro) rendreVueLecture(note.contenu);
+    else $('#vue-lecture').replaceChildren();
+  } else {
+    $('#champ-contenu').hidden = true;
+    $('#vue-lecture').hidden = true;
+    $('#vue-lecture').replaceChildren();
+    $('#zone-liste').hidden = false;
+    $('#btn-ajouter-ligne').hidden = ro;
+  }
+
   $('#options-note').open = false;
   $('#statut-sauvegarde').textContent = '';
+  $('#champ-etiquette').disabled = ro;
+  $('#form-etiquette button[type="submit"]').disabled = ro;
+  $('#btn-changer-type').disabled = ro;
+  $('#btn-partager-note span').textContent = typeof navigator.share === 'function' ? 'Partager' : 'Copier le texte';
+
   rendreElements();
+  rendreActionsListe();
   rendreEpingle();
   rendreCouleurs();
   rendreEtiquettesNote();
   rendreBoutonType();
+  rendreBoutonLectureSeule();
+  rendreBoutonArchiver();
   rendreDates();
 }
 
@@ -612,6 +881,147 @@ function ajusterHauteur(zone) {
   window.scrollTo(0, defilement);
 }
 
+/* ----- Mode lecture seule (rendu 100 % DOM sans innerHTML) ----- */
+
+function nettoyerUrl(brut) {
+  let url = brut;
+  let suffixe = '';
+  while (url.length > 0 && /[.,;:!?}\]]$/.test(url)) {
+    suffixe = url.slice(-1) + suffixe;
+    url = url.slice(0, -1);
+  }
+  while (url.endsWith(')')) {
+    const ouvrantes = (url.match(/\(/g) || []).length;
+    const fermantes = (url.match(/\)/g) || []).length;
+    if (fermantes > ouvrantes) {
+      suffixe = ')' + suffixe;
+      url = url.slice(0, -1);
+    } else {
+      break;
+    }
+  }
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return { href: parsed.href, texte: url, suffixe };
+    }
+  } catch { /* URL invalide */ }
+  return null;
+}
+
+function ajouterContenuInline(parent, texte, profondeur = 0) {
+  let reste = texte;
+  while (reste.length > 0) {
+    const candidats = [];
+    const mUrl = reste.match(/https?:\/\/[^\s<>"]+/);
+    if (mUrl) candidats.push({ type: 'url', index: mUrl.index, match: mUrl, priorite: 0 });
+    const mEmail = reste.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+    if (mEmail) candidats.push({ type: 'email', index: mEmail.index, match: mEmail, priorite: 1 });
+    if (profondeur < 2) {
+      const mGras = reste.match(/\*\*([^\n*]+(?:\*(?!\*)[^\n*]*)*)\*\*/);
+      if (mGras) candidats.push({ type: 'gras', index: mGras.index, match: mGras, priorite: 2 });
+    }
+    const mTel = reste.match(/(?<![\w@])(?:\+\d{1,3}[\s.-]?\d(?:[\s.-]?\d{2}){3,5}|0[1-9](?:[\s.-]?\d{2}){4})(?!\d)/);
+    if (mTel) candidats.push({ type: 'tel', index: mTel.index, match: mTel, priorite: 3 });
+
+    if (candidats.length === 0) {
+      parent.append(document.createTextNode(reste));
+      return;
+    }
+    candidats.sort((a, b) => a.index - b.index || a.priorite - b.priorite);
+    const choisi = candidats[0];
+    if (choisi.index > 0) {
+      parent.append(document.createTextNode(reste.slice(0, choisi.index)));
+    }
+    const brute = choisi.match[0];
+    let consomme = brute.length;
+
+    if (choisi.type === 'url') {
+      const propre = nettoyerUrl(brute);
+      if (propre) {
+        parent.append(creer('a', {
+          href: propre.href,
+          target: '_blank',
+          rel: 'noopener noreferrer',
+          texte: propre.texte,
+        }));
+        consomme = propre.texte.length;
+      } else {
+        parent.append(document.createTextNode(brute));
+      }
+    } else if (choisi.type === 'email') {
+      parent.append(creer('a', { href: 'mailto:' + brute, texte: brute }));
+    } else if (choisi.type === 'tel') {
+      parent.append(creer('a', { href: 'tel:' + brute.replace(/[\s.-]/g, ''), texte: brute }));
+    } else if (choisi.type === 'gras') {
+      const fort = document.createElement('strong');
+      ajouterContenuInline(fort, choisi.match[1], profondeur + 1);
+      parent.append(fort);
+    }
+
+    reste = reste.slice(choisi.index + consomme);
+  }
+}
+
+function rendreVueLecture(texte) {
+  const conteneur = $('#vue-lecture');
+  conteneur.replaceChildren();
+  const lignes = (texte || '').replace(/\r\n?/g, '\n').split('\n');
+  let listeCourante = null;
+  let lignesParagraphe = [];
+
+  const viderParagraphe = () => {
+    if (lignesParagraphe.length === 0) return;
+    const p = document.createElement('p');
+    lignesParagraphe.forEach((l, idx) => {
+      if (idx > 0) p.append(document.createElement('br'));
+      ajouterContenuInline(p, l);
+    });
+    conteneur.append(p);
+    lignesParagraphe = [];
+  };
+
+  for (const ligne of lignes) {
+    const h2 = ligne.match(/^## (.+)$/);
+    const h1 = !h2 && ligne.match(/^# (.+)$/);
+    const puce = ligne.match(/^[-*] (.+)$/);
+
+    if (!ligne.trim()) {
+      viderParagraphe();
+      listeCourante = null;
+    } else if (h2) {
+      viderParagraphe();
+      listeCourante = null;
+      const titre = document.createElement('h4');
+      ajouterContenuInline(titre, h2[1]);
+      conteneur.append(titre);
+    } else if (h1) {
+      viderParagraphe();
+      listeCourante = null;
+      const titre = document.createElement('h3');
+      ajouterContenuInline(titre, h1[1]);
+      conteneur.append(titre);
+    } else if (puce) {
+      viderParagraphe();
+      if (!listeCourante) {
+        listeCourante = document.createElement('ul');
+        conteneur.append(listeCourante);
+      }
+      const li = document.createElement('li');
+      ajouterContenuInline(li, puce[1]);
+      listeCourante.append(li);
+    } else {
+      listeCourante = null;
+      lignesParagraphe.push(ligne);
+    }
+  }
+  viderParagraphe();
+
+  if (conteneur.childNodes.length === 0) {
+    conteneur.append(creer('p', { classe: 'info', texte: 'Note vide.' }));
+  }
+}
+
 /* ----- Listes à cocher ----- */
 
 function rendreElements(idAFocaliser = null) {
@@ -619,16 +1029,22 @@ function rendreElements(idAFocaliser = null) {
   const liste = $('#elements-liste');
   liste.replaceChildren();
   if (!note || note.type !== 'liste') return;
+  const ro = note.lectureSeule === true;
 
   note.elements.forEach((element, index) => {
     const numero = index + 1;
     const ligne = creer('li', { classe: 'element' + (element.coche ? ' coche' : '') });
+    ligne.hidden = etat.masquerCoches && element.coche;
 
     const caseACocher = creer('input', { type: 'checkbox', 'aria-label': `Cocher la ligne ${numero}` });
     caseACocher.checked = element.coche;
+    caseACocher.disabled = ro;
     caseACocher.addEventListener('change', () => {
+      if (note.lectureSeule) return;
       element.coche = caseACocher.checked;
       ligne.classList.toggle('coche', element.coche);
+      ligne.hidden = etat.masquerCoches && element.coche;
+      rendreActionsListe();
       signalerModification();
     });
 
@@ -642,26 +1058,57 @@ function rendreElements(idAFocaliser = null) {
     });
     champ.value = element.texte;
     champ.dataset.id = element.id;
+    champ.disabled = ro;
     champ.addEventListener('input', () => {
+      if (note.lectureSeule) return;
       element.texte = champ.value;
       signalerModification();
     });
     // Touche « Entrée » : on crée une nouvelle ligne juste en dessous.
     champ.addEventListener('keydown', (e) => {
+      if (note.lectureSeule) return;
       if (e.key === 'Enter') {
         e.preventDefault();
         ajouterLigne(index + 1);
       }
     });
 
+    const boutonMonter = creer('button', {
+      type: 'button',
+      classe: 'bouton-ligne bouton-monter',
+      'aria-label': `Monter la ligne ${numero}`,
+      disabled: ro || index === 0,
+      hidden: ro,
+      texte: '↑',
+      onclick: () => deplacerLigne(index, -1),
+    });
+
+    const boutonDescendre = creer('button', {
+      type: 'button',
+      classe: 'bouton-ligne bouton-descendre',
+      'aria-label': `Descendre la ligne ${numero}`,
+      disabled: ro || index === note.elements.length - 1,
+      hidden: ro,
+      texte: '↓',
+      onclick: () => deplacerLigne(index, 1),
+    });
+
     const boutonSupprimer = creer('button', {
       type: 'button',
-      classe: 'bouton-ligne',
+      classe: 'bouton-ligne bouton-supprimer-ligne',
       'aria-label': `Supprimer la ligne ${numero}`,
+      disabled: ro,
+      hidden: ro,
       onclick: () => supprimerLigne(element.id),
     }, [icone('fermer')]);
 
-    ligne.append(creer('label', { classe: 'zone-case' }, [caseACocher]), champ, boutonSupprimer);
+    ligne.append(
+      creer('label', { classe: 'zone-case' }, [caseACocher]),
+      champ,
+      boutonMonter,
+      boutonDescendre,
+      boutonSupprimer
+    );
     liste.append(ligne);
   });
 
@@ -671,23 +1118,83 @@ function rendreElements(idAFocaliser = null) {
   }
 }
 
+function deplacerLigne(index, delta) {
+  const note = noteOuverte();
+  if (!note || note.lectureSeule) return;
+  const cible = index + delta;
+  if (cible < 0 || cible >= note.elements.length) return;
+  [note.elements[index], note.elements[cible]] = [note.elements[cible], note.elements[index]];
+  rendreElements(note.elements[cible].id);
+  signalerModification();
+}
+
+function rendreActionsListe() {
+  const note = noteOuverte();
+  if (!note || note.type !== 'liste') return;
+  const ro = note.lectureSeule === true;
+  const nbCoches = note.elements.filter((e) => e.coche).length;
+
+  const btnMasquer = $('#btn-masquer-coches');
+  btnMasquer.setAttribute('aria-pressed', String(etat.masquerCoches));
+  btnMasquer.textContent = etat.masquerCoches ? `Afficher les cochés (${nbCoches})` : 'Masquer les cochés';
+
+  $('#btn-tout-decocher').hidden = ro || nbCoches === 0;
+  $('#btn-supprimer-coches').hidden = ro || nbCoches === 0;
+}
+
+function basculerMasquerCoches() {
+  const note = noteOuverte();
+  if (!note || note.type !== 'liste') return;
+  etat.masquerCoches = !etat.masquerCoches;
+  rendreElements();
+  rendreActionsListe();
+}
+
+function toutDecocher() {
+  const note = noteOuverte();
+  if (!note || note.type !== 'liste' || note.lectureSeule) return;
+  for (const e of note.elements) e.coche = false;
+  rendreElements();
+  rendreActionsListe();
+  signalerModification();
+}
+
+async function supprimerCoches() {
+  const note = noteOuverte();
+  if (!note || note.type !== 'liste' || note.lectureSeule) return;
+  const nbCoches = note.elements.filter((e) => e.coche).length;
+  if (nbCoches === 0) return;
+  const ok = await confirmer(
+    'Retirer les éléments cochés ?',
+    `${pluriel(nbCoches, 'élément coché sera retiré', 'éléments cochés seront retirés')} de la liste.`,
+    'Retirer'
+  );
+  if (!ok || noteOuverte() !== note) return;
+  note.elements = note.elements.filter((e) => !e.coche);
+  rendreElements();
+  rendreActionsListe();
+  signalerModification();
+}
+
 function ajouterLigne(position) {
   const note = noteOuverte();
-  if (!note) return;
+  if (!note || note.lectureSeule) return;
   const element = { id: nouvelId(), texte: '', coche: false };
   note.elements.splice(position ?? note.elements.length, 0, element);
   rendreElements(element.id);
+  rendreActionsListe();
   signalerModification();
 }
 
 function supprimerLigne(id) {
   const note = noteOuverte();
-  if (!note) return;
+  if (!note || note.lectureSeule) return;
   const index = note.elements.findIndex((e) => e.id === id);
   if (index === -1) return;
   note.elements.splice(index, 1);
   const voisine = note.elements[Math.max(0, index - 1)];
   rendreElements(voisine ? voisine.id : null);
+  rendreActionsListe();
   if (!voisine) $('#btn-ajouter-ligne').focus();
   signalerModification();
 }
@@ -714,12 +1221,14 @@ function basculerEpingle() {
 function rendreCouleurs() {
   const note = noteOuverte();
   if (!note) return;
+  const ro = note.lectureSeule === true;
   const groupe = $('#choix-couleur');
   groupe.querySelectorAll('.pastille').forEach((p) => p.remove());
   for (const couleur of COULEURS) {
-    const bouton = creer('input', { type: 'radio', name: 'couleur-note', value: couleur.id, 'aria-label': couleur.nom });
+    const bouton = creer('input', { type: 'radio', name: 'couleur-note', value: couleur.id, 'aria-label': couleur.nom, disabled: ro });
     bouton.checked = note.couleur === couleur.id;
     bouton.addEventListener('change', () => {
+      if (note.lectureSeule) return;
       note.couleur = couleur.id;
       appliquerCouleurEditeur();
       signalerModification();
@@ -739,6 +1248,7 @@ function appliquerCouleurEditeur() {
 function rendreEtiquettesNote() {
   const note = noteOuverte();
   if (!note) return;
+  const ro = note.lectureSeule === true;
   const zone = $('#etiquettes-note');
   zone.replaceChildren(...note.etiquettes.map((etiquette) =>
     creer('span', { classe: 'puce etiquette-retirable' }, [
@@ -746,7 +1256,10 @@ function rendreEtiquettesNote() {
       creer('button', {
         type: 'button',
         'aria-label': `Retirer l'étiquette ${etiquette}`,
+        disabled: ro,
+        hidden: ro,
         onclick: () => {
+          if (note.lectureSeule) return;
           note.etiquettes = note.etiquettes.filter((t) => t !== etiquette);
           rendreEtiquettesNote();
           signalerModification();
@@ -762,12 +1275,12 @@ function rendreEtiquettesNote() {
 
 function ajouterEtiquette(evenement) {
   evenement.preventDefault();
+  const note = noteOuverte();
+  if (!note || note.lectureSeule) return;
   const champ = $('#champ-etiquette');
   const texte = nettoyerEtiquette(champ.value);
   champ.value = '';
   if (!texte) return;
-  const note = noteOuverte();
-  if (!note) return;
   // Si une étiquette identique existe déjà ailleurs (ex. « Courses »), on garde son orthographe.
   const existante = toutesLesEtiquettes().find((t) => simplifier(t) === simplifier(texte));
   note.etiquettes = dedoublonner([...note.etiquettes, existante || texte]);
@@ -787,7 +1300,7 @@ function rendreBoutonType() {
 
 async function changerType() {
   const note = noteOuverte();
-  if (!note) return;
+  if (!note || note.lectureSeule) return;
   if (note.type === 'texte') {
     // Chaque ligne du texte devient une ligne à cocher.
     const lignes = note.contenu.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -812,6 +1325,139 @@ async function changerType() {
   $('#options-note').open = true;
   ajusterHauteur($('#champ-contenu'));
   signalerModification();
+}
+
+function rendreBoutonLectureSeule() {
+  const note = noteOuverte();
+  if (!note) return;
+  const ro = note.lectureSeule === true;
+  const bouton = $('#btn-lecture-seule');
+  bouton.setAttribute('aria-pressed', String(ro));
+  bouton.replaceChildren(
+    icone('lecture'),
+    document.createTextNode(ro ? 'Passer en mode édition' : 'Activer le mode lecture seule')
+  );
+}
+
+function basculerLectureSeule() {
+  const note = noteOuverte();
+  if (!note) return;
+  note.lectureSeule = !note.lectureSeule;
+  const optionOuverte = $('#options-note').open;
+  remplirEditeur();
+  $('#options-note').open = optionOuverte;
+  if (!note.lectureSeule && note.type === 'texte') ajusterHauteur($('#champ-contenu'));
+  signalerModification();
+}
+
+function rendreBoutonArchiver() {
+  const note = noteOuverte();
+  if (!note) return;
+  const bouton = $('#btn-archiver-note');
+  bouton.replaceChildren(
+    icone('archiver'),
+    document.createTextNode(note.archivee ? 'Désarchiver la note' : 'Archiver la note')
+  );
+}
+
+async function basculerArchivage() {
+  const note = noteOuverte();
+  if (!note) return;
+  if (noteEstVide(note)) { retour(); return; }
+  if (noteEnAttente === note) { clearTimeout(minuterieEnregistrement); noteEnAttente = null; }
+  const etaitArchivee = note.archivee === true;
+  note.archivee = !etaitArchivee;
+  note.modifieLe = Date.now();
+  etat.noteOuverteId = null;
+  await stockerNote(note);
+  retour();
+  afficherMessage(note.archivee ? 'Note archivée.' : 'Note désarchivée.', {
+    action: 'Annuler',
+    siAction: async () => {
+      note.archivee = etaitArchivee;
+      note.modifieLe = Date.now();
+      await stockerNote(note);
+      if (etat.ecran === 'liste') rendreListe();
+      if (etat.ecran === 'archives') rendreArchives();
+    },
+  });
+}
+
+/* ----- Export unitaire (.txt, .md) et partage ----- */
+
+function nomFichierNote(note, extension) {
+  const base = simplifier(note.titre.trim() || 'note')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60) || 'note';
+  return `${base}.${extension}`;
+}
+
+function noteEnTexte(note) {
+  const corps = note.type === 'liste'
+    ? note.elements.map((e) => (e.coche ? '[x] ' : '[ ] ') + e.texte).join('\n')
+    : note.contenu;
+  const titre = note.titre.trim();
+  return titre ? `${titre}\n\n${corps}` : corps;
+}
+
+function noteEnMarkdown(note) {
+  const parties = [`# ${note.titre.trim() || 'Sans titre'}`];
+  if (note.etiquettes.length > 0) {
+    parties.push(`Étiquettes : ${note.etiquettes.join(', ')}`);
+  }
+  const corps = note.type === 'liste'
+    ? note.elements.map((e) => (e.coche ? '- [x] ' : '- [ ] ') + e.texte).join('\n')
+    : note.contenu;
+  if (corps.trim()) parties.push(corps);
+  return parties.join('\n\n');
+}
+
+function telechargerTexte(nomFichier, contenu, typeMime = 'text/plain;charset=utf-8') {
+  const fichier = new Blob([contenu], { type: typeMime });
+  const adresse = URL.createObjectURL(fichier);
+  const lien = creer('a', { href: adresse, download: nomFichier });
+  document.body.append(lien);
+  lien.click();
+  lien.remove();
+  setTimeout(() => URL.revokeObjectURL(adresse), 30000);
+}
+
+function exporterNoteTexte() {
+  const note = noteOuverte();
+  if (!note) return;
+  const nom = nomFichierNote(note, 'txt');
+  telechargerTexte(nom, noteEnTexte(note), 'text/plain;charset=utf-8');
+  afficherMessage(`Note exportée (${nom}).`, { duree: 4000 });
+}
+
+function exporterNoteMarkdown() {
+  const note = noteOuverte();
+  if (!note) return;
+  const nom = nomFichierNote(note, 'md');
+  telechargerTexte(nom, noteEnMarkdown(note), 'text/markdown;charset=utf-8');
+  afficherMessage(`Note exportée (${nom}).`, { duree: 4000 });
+}
+
+async function partagerNote() {
+  const note = noteOuverte();
+  if (!note) return;
+  const titre = note.titre.trim() || 'Omni-Notes';
+  const texte = noteEnTexte(note);
+  if (typeof navigator.share === 'function') {
+    try {
+      await navigator.share({ title: titre, text: texte });
+      return;
+    } catch (erreur) {
+      if (erreur && erreur.name === 'AbortError') return;
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(texte);
+    afficherMessage('Texte copié dans le presse-papiers.', { duree: 3000 });
+  } catch {
+    afficherMessage('Impossible de copier automatiquement le texte.', { duree: 5000 });
+  }
 }
 
 function rendreDates() {
@@ -842,7 +1488,36 @@ async function supprimerNoteOuverte() {
    ===================================================================== */
 
 function notesActives() {
-  return etat.notes.filter((n) => !n.supprimeeLe);
+  return etat.notes.filter((n) => !n.supprimeeLe && !n.archivee);
+}
+
+function notesArchivees() {
+  return etat.notes.filter((n) => !n.supprimeeLe && n.archivee);
+}
+
+function comparerNotes(a, b, tri = etat.prefs.tri) {
+  if (tri === 'creation') {
+    return (b.creeLe || 0) - (a.creeLe || 0);
+  }
+  if (tri === 'titre') {
+    const ta = a.titre.trim();
+    const tb = b.titre.trim();
+    if (!ta && tb) return 1;
+    if (ta && !tb) return -1;
+    const cmp = ta.localeCompare(tb, 'fr', { sensitivity: 'base' });
+    if (cmp !== 0) return cmp;
+    return (b.modifieLe || 0) - (a.modifieLe || 0);
+  }
+  if (tri === 'couleur') {
+    const rang = (c) => {
+      const i = COULEURS.findIndex((x) => x.id === c);
+      return i <= 0 ? COULEURS.length : i;
+    };
+    const cmp = rang(a.couleur) - rang(b.couleur);
+    if (cmp !== 0) return cmp;
+    return (b.modifieLe || 0) - (a.modifieLe || 0);
+  }
+  return (b.modifieLe || 0) - (a.modifieLe || 0);
 }
 
 function toutesLesEtiquettes() {
@@ -856,6 +1531,15 @@ function texteDeRecherche(note) {
 }
 
 function rendreListe() {
+  $('#btn-verrouiller-rapide').hidden = !motDePasseActif();
+  const selectTri = $('#select-tri');
+  selectTri.value = TRIS_VALIDES.includes(etat.prefs.tri) ? etat.prefs.tri : 'modification';
+
+  const archivees = notesArchivees();
+  const btnArchives = $('#btn-ouvrir-archives');
+  btnArchives.hidden = archivees.length === 0;
+  btnArchives.textContent = `Archives (${archivees.length})`;
+
   const actives = notesActives();
   const etiquettes = toutesLesEtiquettes();
   const filtreSimplifie = etat.filtreEtiquette ? simplifier(etat.filtreEtiquette) : null;
@@ -869,7 +1553,7 @@ function rendreListe() {
   const visibles = actives
     .filter((n) => !filtreActif || n.etiquettes.some((t) => simplifier(t) === filtreActif))
     .filter((n) => !recherche || texteDeRecherche(n).includes(recherche))
-    .sort((a, b) => b.modifieLe - a.modifieLe);
+    .sort((a, b) => comparerNotes(a, b, etat.prefs.tri));
 
   const epinglees = visibles.filter((n) => n.epinglee);
   const autres = visibles.filter((n) => !n.epinglee);
@@ -925,10 +1609,21 @@ function interieurCarte(note, textePied) {
   if (note.epinglee && !note.supprimeeLe) titre.append(icone('epingle'));
   titre.append(document.createTextNode(note.titre.trim() || 'Sans titre'));
   const texteApercu = apercu(note);
+
+  let puceCocher = null;
+  if (note.type === 'liste') {
+    const remplies = note.elements.filter((e) => e.texte.trim());
+    if (remplies.length > 0) {
+      const coches = remplies.filter((e) => e.coche).length;
+      puceCocher = creer('span', { classe: 'puce', texte: `${coches} / ${remplies.length} cochés` });
+    }
+  }
+
   return [
     titre,
     texteApercu ? creer('span', { classe: 'carte-extrait', texte: texteApercu }) : null,
     creer('span', { classe: 'carte-pied' }, [
+      puceCocher,
       ...note.etiquettes.map((t) => creer('span', { classe: 'puce', texte: t })),
       creer('span', { texte: textePied }),
     ]),
@@ -994,8 +1689,62 @@ async function restaurerNote(note) {
   note.modifieLe = Date.now();
   await stockerNote(note);
   if (etat.ecran === 'corbeille') rendreCorbeille();
+  if (etat.ecran === 'archives') rendreArchives();
   if (etat.ecran === 'liste') rendreListe();
   afficherMessage('Note restaurée.', { duree: 3000 });
+}
+
+/* =====================================================================
+   5b. Les archives
+   ===================================================================== */
+
+function rendreArchives() {
+  const archivees = notesArchivees().sort((a, b) => b.modifieLe - a.modifieLe);
+  const liste = $('#liste-archives');
+  liste.replaceChildren(...archivees.map((note) =>
+    creer('li', {}, [
+      creer('div', { classe: 'carte', 'data-couleur': note.couleur }, [
+        creer('button', {
+          type: 'button',
+          classe: 'carte-apercu',
+          onclick: () => ouvrirNote(note.id),
+        }, interieurCarte(note, `Modifiée ${dateLisible(note.modifieLe)}`)),
+        creer('div', { classe: 'carte-actions' }, [
+          creer('button', {
+            type: 'button',
+            classe: 'bouton principal',
+            onclick: () => desarchiverNote(note),
+          }, [icone('restaurer'), document.createTextNode('Désarchiver')]),
+          creer('button', {
+            type: 'button',
+            classe: 'bouton',
+            onclick: () => mettreEnCorbeilleDepuisArchives(note),
+          }, [icone('corbeille'), document.createTextNode('Corbeille')]),
+        ]),
+      ]),
+    ])
+  ));
+  $('#archives-vide').hidden = archivees.length > 0;
+}
+
+async function desarchiverNote(note) {
+  if (!etat.notes.includes(note)) return;
+  note.archivee = false;
+  note.modifieLe = Date.now();
+  await stockerNote(note);
+  rendreArchives();
+  afficherMessage('Note désarchivée.', { duree: 3000 });
+}
+
+async function mettreEnCorbeilleDepuisArchives(note) {
+  if (!etat.notes.includes(note)) return;
+  note.supprimeeLe = Date.now();
+  await stockerNote(note);
+  rendreArchives();
+  afficherMessage('Note placée dans la corbeille.', {
+    action: 'Annuler',
+    siAction: () => restaurerNote(note),
+  });
 }
 
 async function effacerDefinitivement(note) {
@@ -1073,8 +1822,11 @@ async function exporter() {
       // Mot de passe actif : la sauvegarde est chiffrée elle aussi.
       const paquet = await chiffrement.chiffrer(etat.cle, notes);
       contenu = { ...entete, chiffre: true, sel: etat.securite.sel, iterations: etat.securite.iterations, iv: paquet.iv, donnees: paquet.donnees };
+      if (etat.modeles.length > 0) {
+        contenu.modelesChiffres = await chiffrement.chiffrer(etat.cle, etat.modeles);
+      }
     } else {
-      contenu = { ...entete, chiffre: false, notes };
+      contenu = { ...entete, chiffre: false, notes, modeles: etat.modeles };
     }
 
     const aujourdhui = new Date();
@@ -1120,11 +1872,15 @@ async function importerFichier(fichier) {
   if (!donnees || typeof donnees !== 'object' || donnees.application !== 'omni-notes') { erreurFichier(); return; }
 
   let notesBrutes;
+  let modelesBruts;
   if (donnees.chiffre) {
-    notesBrutes = await dechiffrerSauvegarde(donnees);
-    if (!notesBrutes) return; // annulé ou erreur déjà signalée
+    const dechiffre = await dechiffrerSauvegarde(donnees);
+    if (!dechiffre) return; // annulé ou erreur déjà signalée
+    notesBrutes = dechiffre.notesBrutes;
+    modelesBruts = dechiffre.modelesBrutes;
   } else {
     notesBrutes = donnees.notes;
+    modelesBruts = donnees.modeles;
   }
   if (!Array.isArray(notesBrutes)) { erreurFichier(); return; }
 
@@ -1143,6 +1899,10 @@ async function importerFichier(fichier) {
     afficherMessage('Ce fichier ne contient aucune note.', { duree: 6000 });
     return;
   }
+
+  const modelesImportes = Array.isArray(modelesBruts)
+    ? modelesBruts.map(normaliserModele).filter(Boolean)
+    : null;
 
   const choix = await demander({
     titre: 'Importer des notes',
@@ -1168,9 +1928,47 @@ async function importerFichier(fichier) {
       );
       if (!ok) return;
       await remplacerNotes(importees);
+      if (modelesImportes) {
+        etat.modeles = modelesImportes;
+        await sauverModeles();
+      }
       afficherMessage(`${pluriel(importees.length, 'note importée', 'notes importées')}. Vos anciennes notes ont été remplacées.`, { duree: 8000 });
     } else {
+      const analyse = analyserFusion(importees);
+      const messagesFusion = [
+        `Nouvelles notes ajoutées : ${analyse.ajoutees.length}`,
+        `Notes mises à jour : ${analyse.misesAJour.length}`,
+        `Notes déjà à jour (inchangées) : ${analyse.inchangees.length}`,
+      ];
+      if (analyse.misesAJour.length > 0) {
+        const titresMaj = analyse.misesAJour
+          .slice(0, 5)
+          .map((n) => `« ${n.titre.trim() || 'Sans titre'} »`)
+          .join(', ');
+        const reste = analyse.misesAJour.length > 5
+          ? ` (et ${analyse.misesAJour.length - 5} autre${analyse.misesAJour.length - 5 > 1 ? 's' : ''})`
+          : '';
+        messagesFusion.push(`Mises à jour concernées : ${titresMaj}${reste}.`);
+      }
+      const confirmerFusion = await demander({
+        titre: 'Comparer avant de fusionner',
+        message: messagesFusion,
+        boutons: [
+          { texte: 'Confirmer la fusion', valeur: 'confirmer', style: 'principal' },
+          { texte: 'Annuler', valeur: null },
+        ],
+      });
+      if (confirmerFusion.valeur !== 'confirmer') return;
+
       const bilan = await fusionnerNotes(importees);
+      if (modelesImportes && modelesImportes.length > 0) {
+        const existants = new Set(etat.modeles.map((m) => m.id));
+        const ajoutsModeles = modelesImportes.filter((m) => !existants.has(m.id));
+        if (ajoutsModeles.length > 0) {
+          etat.modeles.push(...ajoutsModeles);
+          await sauverModeles();
+        }
+      }
       afficherMessage(`Import terminé : ${pluriel(bilan.ajoutees, 'note ajoutée', 'notes ajoutées')}, ${pluriel(bilan.misesAJour, 'mise à jour', 'mises à jour')}, ${pluriel(bilan.inchangees, 'déjà à jour', 'déjà à jour')}.`, { duree: 9000 });
     }
     etat.filtreEtiquette = null;
@@ -1213,11 +2011,31 @@ async function dechiffrerSauvegarde(donnees) {
     try {
       afficherMessage('Vérification du mot de passe…', { duree: 3000 });
       const cle = await chiffrement.deriverCle(reponse.saisie, selOctets, iterations);
-      return await chiffrement.dechiffrer(cle, donnees);
+      const notesBrutes = await chiffrement.dechiffrer(cle, donnees);
+      let modelesBrutes = null;
+      if (donnees.modelesChiffres) {
+        try {
+          modelesBrutes = await chiffrement.dechiffrer(cle, donnees.modelesChiffres);
+        } catch { modelesBrutes = null; }
+      }
+      return { notesBrutes, modelesBrutes };
     } catch {
       message = 'Mot de passe incorrect. Réessayez.';
     }
   }
+}
+
+function analyserFusion(importees) {
+  const ajoutees = [];
+  const misesAJour = [];
+  const inchangees = [];
+  for (const note of importees) {
+    const existante = trouverNote(note.id);
+    if (!existante) ajoutees.push(note);
+    else if (horodatageNote(note) > horodatageNote(existante)) misesAJour.push(note);
+    else inchangees.push(note);
+  }
+  return { ajoutees, misesAJour, inchangees };
 }
 
 async function remplacerNotes(nouvelles) {
@@ -1232,20 +2050,8 @@ async function remplacerNotes(nouvelles) {
 
 async function fusionnerNotes(importees) {
   await enregistrerMaintenant();
-  const bilan = { ajoutees: 0, misesAJour: 0, inchangees: 0 };
-  const aEcrire = [];
-  for (const note of importees) {
-    const existante = trouverNote(note.id);
-    if (!existante) {
-      bilan.ajoutees++;
-      aEcrire.push(note);
-    } else if (horodatageNote(note) > horodatageNote(existante)) {
-      bilan.misesAJour++;
-      aEcrire.push(note);
-    } else {
-      bilan.inchangees++;
-    }
-  }
+  const analyse = analyserFusion(importees);
+  const aEcrire = [...analyse.ajoutees, ...analyse.misesAJour];
   const operations = [];
   for (const note of aEcrire) operations.push({ magasin: 'notes', action: 'ecrire', valeur: await versStockage(note) });
   if (operations.length) await enFile(() => db.groupe(operations));
@@ -1254,12 +2060,37 @@ async function fusionnerNotes(importees) {
     etat.notes.push(note);
   }
   await purgerCorbeille();
-  return bilan;
+  return {
+    ajoutees: analyse.ajoutees.length,
+    misesAJour: analyse.misesAJour.length,
+    inchangees: analyse.inchangees.length,
+  };
 }
 
 /* =====================================================================
    7. Mot de passe et chiffrement
    ===================================================================== */
+
+let minuterieInactivite = null;
+let derniereActiviteInactivite = 0;
+
+function annulerMinuterieInactivite() {
+  clearTimeout(minuterieInactivite);
+  minuterieInactivite = null;
+}
+
+function reinitialiserMinuterieInactivite(forcer = false) {
+  const minutes = Number(etat.prefs.verrouInactiviteMinutes) || 0;
+  if (!motDePasseActif() || etat.verrouille || minutes <= 0) {
+    annulerMinuterieInactivite();
+    return;
+  }
+  const maintenant = Date.now();
+  if (!forcer && minuterieInactivite && maintenant - derniereActiviteInactivite < 1000) return;
+  derniereActiviteInactivite = maintenant;
+  clearTimeout(minuterieInactivite);
+  minuterieInactivite = setTimeout(() => { verrouiller(); }, minutes * 60 * 1000);
+}
 
 function afficherVerrou() {
   etat.verrouille = true;
@@ -1319,6 +2150,7 @@ async function deverrouiller(evenement) {
 async function verrouiller() {
   if (!motDePasseActif() || etat.verrouille) return;
   etat.verrouille = true;
+  annulerMinuterieInactivite();
   document.querySelectorAll('dialog[open]').forEach((d) => d.close());
   try {
     if (etat.ecran === 'edition') await quitterEditeur();
@@ -1336,18 +2168,25 @@ async function verrouiller() {
 
     etat.cle = null;
     etat.notes = [];
+    etat.modeles = [];
     etat.noteOuverteId = null;
+    etat.masquerCoches = false;
     etat.recherche = '';
     etat.filtreEtiquette = null;
 
     // On vide aussi tout le DOM pouvant contenir des notes ou étiquettes.
     $('#liste-notes').replaceChildren();
     $('#liste-corbeille').replaceChildren();
+    $('#liste-archives').replaceChildren();
     $('#filtres-etiquettes').replaceChildren();
     $('#filtres-etiquettes').hidden = true;
     $('#etiquettes-note').replaceChildren();
     $('#liste-etiquettes').replaceChildren();
     $('#elements-liste').replaceChildren();
+    $('#vue-lecture').replaceChildren();
+    $('#vue-lecture').hidden = true;
+    $('#bandeau-lecture-seule').hidden = true;
+    $('#btn-verrouiller-rapide').hidden = true;
     $('#champ-recherche').value = '';
     $('#champ-titre').value = '';
     $('#champ-contenu').value = '';
@@ -1432,6 +2271,7 @@ async function validerMotDePasse(evenement) {
 
     mdpEnCours = false;
     fermerDialogueMotDePasse();
+    reinitialiserMinuterieInactivite(true);
     rendreReglages();
     const messages = {
       activer: 'Mot de passe activé : vos notes sont maintenant chiffrées.',
@@ -1484,6 +2324,13 @@ async function appliquerChiffrement(motDePasse) {
         valeur: await versStockage(note, cle, { autoriserClair: motDePasse === null }),
       });
     }
+    if (etat.modeles.length > 0) {
+      operations.push({
+        magasin: 'reglages',
+        action: 'ecrire',
+        valeur: await versStockageModeles(etat.modeles, cle, { autoriserClair: motDePasse === null }),
+      });
+    }
     operations.push(securite
       ? { magasin: 'reglages', action: 'ecrire', valeur: securite }
       : { magasin: 'reglages', action: 'effacer', cle: 'securite' });
@@ -1516,10 +2363,12 @@ async function toutEffacer() {
   await enFile(() => db.groupe([
     { magasin: 'notes', action: 'vider' },
     { magasin: 'reglages', action: 'effacer', cle: 'securite' },
+    { magasin: 'reglages', action: 'effacer', cle: 'modeles' },
   ]));
   etat.securite = null;
   etat.cle = null;
   etat.notes = [];
+  etat.modeles = [];
   etat.notesIllisibles = 0;
   etat.recherche = '';
   etat.filtreEtiquette = null;
@@ -1568,6 +2417,7 @@ function rendreReglages() {
   }
   $('#actions-mdp-actif').hidden = !actif;
   $('#actions-mdp-inactif').hidden = actif;
+  $('#select-verrou-inactivite').value = String(DELAIS_INACTIVITE.includes(Number(etat.prefs.verrouInactiviteMinutes)) ? etat.prefs.verrouInactiviteMinutes : 0);
 }
 
 /* =====================================================================
@@ -1588,16 +2438,23 @@ function brancherEvenements() {
     inscriptionSw.waiting.postMessage({ type: 'activer' });
   });
   $('#btn-nouvelle-note').addEventListener('click', choisirTypeNouvelleNote);
+  $('#btn-verrouiller-rapide').addEventListener('click', verrouiller);
+  $('#btn-ouvrir-archives').addEventListener('click', () => allerA('archives'));
   $('#btn-ouvrir-corbeille').addEventListener('click', async () => { await purgerCorbeille(); allerA('corbeille'); });
   $('#btn-ouvrir-reglages').addEventListener('click', () => allerA('reglages'));
   $('#champ-recherche').addEventListener('input', (e) => { etat.recherche = e.target.value; rendreListe(); });
+  $('#select-tri').addEventListener('change', async (e) => {
+    etat.prefs.tri = TRIS_VALIDES.includes(e.target.value) ? e.target.value : 'modification';
+    rendreListe();
+    await sauverPreferences();
+  });
   $('#rappel-sauver').addEventListener('click', exporter);
   $('#rappel-plus-tard').addEventListener('click', reporterRappel);
 
   // Édition
   $('#champ-titre').addEventListener('input', (e) => {
     const note = noteOuverte();
-    if (!note) return;
+    if (!note || note.lectureSeule) return;
     note.titre = e.target.value;
     signalerModification();
   });
@@ -1605,7 +2462,7 @@ function brancherEvenements() {
     if (e.key !== 'Enter') return;
     e.preventDefault();
     const note = noteOuverte();
-    if (!note) return;
+    if (!note || note.lectureSeule) return;
     if (note.type === 'texte') $('#champ-contenu').focus();
     else {
       const premier = $('#elements-liste .element-texte');
@@ -1614,7 +2471,7 @@ function brancherEvenements() {
   });
   $('#champ-contenu').addEventListener('input', (e) => {
     const note = noteOuverte();
-    if (!note) return;
+    if (!note || note.lectureSeule) return;
     note.contenu = e.target.value;
     ajusterHauteur(e.target);
     signalerModification();
@@ -1623,10 +2480,20 @@ function brancherEvenements() {
     if (etat.ecran === 'edition') ajusterHauteur($('#champ-contenu'));
   });
   $('#btn-ajouter-ligne').addEventListener('click', () => ajouterLigne());
+  $('#btn-masquer-coches').addEventListener('click', basculerMasquerCoches);
+  $('#btn-tout-decocher').addEventListener('click', toutDecocher);
+  $('#btn-supprimer-coches').addEventListener('click', supprimerCoches);
   $('#btn-epingler').addEventListener('click', basculerEpingle);
   $('#btn-supprimer-note').addEventListener('click', supprimerNoteOuverte);
   $('#form-etiquette').addEventListener('submit', ajouterEtiquette);
   $('#btn-changer-type').addEventListener('click', changerType);
+  $('#btn-lecture-seule').addEventListener('click', basculerLectureSeule);
+  $('#btn-quitter-lecture-seule').addEventListener('click', basculerLectureSeule);
+  $('#btn-archiver-note').addEventListener('click', basculerArchivage);
+  $('#btn-sauver-modele').addEventListener('click', enregistrerCommeModele);
+  $('#btn-exporter-txt').addEventListener('click', exporterNoteTexte);
+  $('#btn-exporter-md').addEventListener('click', exporterNoteMarkdown);
+  $('#btn-partager-note').addEventListener('click', partagerNote);
 
   // Corbeille
   $('#btn-vider-corbeille').addEventListener('click', viderCorbeille);
@@ -1653,7 +2520,58 @@ function brancherEvenements() {
   $('#btn-modifier-mdp').addEventListener('click', () => ouvrirDialogueMotDePasse('modifier'));
   $('#btn-desactiver-mdp').addEventListener('click', () => ouvrirDialogueMotDePasse('desactiver'));
   $('#btn-verrouiller').addEventListener('click', verrouiller);
+  $('#select-verrou-inactivite').addEventListener('change', async (e) => {
+    const val = Number(e.target.value);
+    etat.prefs.verrouInactiviteMinutes = DELAIS_INACTIVITE.includes(val) ? val : 0;
+    await sauverPreferences();
+    reinitialiserMinuterieInactivite(true);
+  });
+  $('#btn-reglages-archives').addEventListener('click', () => allerA('archives'));
   $('#btn-ouvrir-apropos').addEventListener('click', () => allerA('apropos'));
+
+  // Raccourcis clavier (ordinateur) et détection d'activité pour verrouillage
+  for (const evt of ['pointerdown', 'keydown', 'touchstart']) {
+    document.addEventListener(evt, () => reinitialiserMinuterieInactivite(false), { passive: true });
+  }
+  document.addEventListener('keydown', async (e) => {
+    if (etat.verrouille || etat.ecran === 'verrou' || etat.ecran === 'chargement') return;
+    if (document.querySelector('dialog[open]')) return;
+
+    const mod = e.ctrlKey || e.metaKey;
+    const touche = e.key.toLowerCase();
+
+    if (mod && !e.altKey && !e.shiftKey && touche === 'k') {
+      e.preventDefault();
+      if (etat.ecran !== 'liste') {
+        if (etat.ecran === 'edition') await quitterEditeur();
+        history.replaceState({ ecran: 'liste' }, '');
+        afficherEcran('liste');
+      }
+      const champ = $('#champ-recherche');
+      champ.focus();
+      champ.select();
+      return;
+    }
+
+    if (etat.ecran === 'liste' && ((e.altKey && !mod && touche === 'n') || (mod && e.shiftKey && touche === 'n'))) {
+      e.preventDefault();
+      choisirTypeNouvelleNote();
+      return;
+    }
+
+    if (etat.ecran === 'edition' && mod && !e.shiftKey && !e.altKey && touche === 's') {
+      e.preventDefault();
+      await enregistrerMaintenant();
+      return;
+    }
+
+    if (etat.ecran === 'liste' && e.key === 'Escape' && $('#champ-recherche').value !== '') {
+      e.preventDefault();
+      $('#champ-recherche').value = '';
+      etat.recherche = '';
+      rendreListe();
+    }
+  });
 
   // Fenêtre du mot de passe
   $('#form-mdp').addEventListener('submit', validerMotDePasse);
